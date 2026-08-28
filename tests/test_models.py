@@ -15,7 +15,7 @@ from app.models import AttemptStatus, Job, JobAttempt, JobDependency, JobStatus,
 class ModelMetadataTests(unittest.TestCase):
     def test_all_models_are_registered(self) -> None:
         self.assertEqual(
-            {"jobs", "job_attempts", "workers", "recurring_jobs", "dead_letter_jobs", "users", "rate_limit_records", "job_dependencies", "workflows"},
+            {"jobs", "job_attempts", "workers", "recurring_jobs", "dead_letter_jobs", "users", "rate_limit_records", "job_dependencies", "workflows", "audit_events"},
             set(Base.metadata.tables),
         )
 

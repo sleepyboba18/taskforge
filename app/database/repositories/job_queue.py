@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session, aliased
 
 from app.models import AttemptStatus, Job, JobAttempt, JobDependency, JobStatus, Worker
 from app.services.workflow_service import update_workflow_status
+from app.models import AuditActorType, AuditEntityType, AuditEventType
+from app.services.audit_service import record_event
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,7 @@ def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
         started_at=now,
         last_heartbeat_at=now,
     )
+    previous_status = job.status.value
     job.status = JobStatus.RUNNING
     update_workflow_status(session, job.workflow_id)
     job.worker_id = worker_id
@@ -71,4 +74,6 @@ def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
         worker.current_job_id = job.id
     session.add(attempt)
     session.flush()
+    record_event(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": previous_status, "to_status": JobStatus.RUNNING.value, "reason": "worker_claimed_job"})
+    record_event(session, event_type=AuditEventType.JOB_ATTEMPT_STARTED, entity_type=AuditEntityType.JOB_ATTEMPT, entity_id=attempt.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, job_attempt_id=attempt.id, details={"attempt_number": attempt.attempt_number})
     return ClaimedJob(job.id, attempt.id, job.task_type, dict(job.payload), worker_id)

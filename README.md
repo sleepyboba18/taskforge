@@ -54,7 +54,7 @@ Configure `JWT_SECRET_KEY` and `JWT_ACCESS_TOKEN_EXPIRES_MINUTES` in `.env`; no 
 
 `GET /health` is public liveness and reports whether the Flask process is responding. `GET /ready` is public readiness and performs a lightweight PostgreSQL connectivity check, returning `503` when the database is unavailable. Neither endpoint exposes infrastructure details.
 
-Authenticated users can query `GET /api/v1/health` for database, worker, scheduler, and queue state, and `GET /api/v1/metrics` for PostgreSQL-derived queue counts, workflow totals, dependency counts, throughput, execution latency, success/failure rates, DLQ counts, and worker counts. Metrics supports the strict windows `1h`, `24h`, and `7d`. Viewers, operators, and administrators may read these endpoints.
+Authenticated users can query `GET /api/v1/health` for database, worker, scheduler, and queue state, and `GET /api/v1/metrics` for PostgreSQL-derived queue counts, workflow totals, dependency counts, audit totals, throughput, execution latency, success/failure rates, DLQ counts, and worker counts. Metrics supports the strict windows `1h`, `24h`, and `7d`. Viewers, operators, and administrators may read these endpoints.
 
 Every HTTP response includes an `X-Request-ID`. A valid client-supplied request ID is reused; otherwise TaskForge generates a UUID. Request timing and slow requests are logged without request bodies, passwords, JWTs, authorization headers, database URLs, or other secrets. Configure `LOG_LEVEL`, `SLOW_REQUEST_THRESHOLD_MS`, and `METRICS_DEFAULT_WINDOW` in `.env`.
 
@@ -156,6 +156,33 @@ Each request accepts a unique `job_ids` array limited by `MAX_BULK_JOB_OPERATION
 ## Workflow Dependencies
 
 Workflow membership does not create dependencies automatically. Explicit Job dependencies continue to control execution, including cross-workflow dependencies. A workflow cannot be structurally changed by these APIs after execution begins, and dependency failure propagation can cause the workflow to fail without executing blocked Jobs.
+
+## Audit Trail
+
+Application logs remain technical runtime diagnostics. The append-only PostgreSQL audit trail records meaningful business and security actions without storing passwords, tokens, authorization headers, database credentials, or complete Job payloads. `AUDIT_RETENTION_DAYS=0` means unlimited retention; this module does not automatically delete audit history.
+
+## Execution History
+
+`JobAttempt` remains authoritative for detailed execution attempts. Audit events complement it with committed Job, attempt, workflow, dependency, worker, DLQ, scheduling, and bulk-operation history. Each API event preserves the existing request ID, while worker events identify the responsible worker.
+
+## Audit Event Types
+
+Events include Job and attempt lifecycle changes, workflow lifecycle changes, dependency changes, DLQ operations, worker registration/staleness, bulk actions, and authorization-sensitive denials where implemented. Audit details are server-generated bounded metadata, such as status transitions, retry source, actor, and counts.
+
+## Audit APIs
+
+```text
+GET /api/v1/audit-events
+GET /api/v1/audit-events/<audit_event_id>
+GET /api/v1/jobs/<job_id>/history
+GET /api/v1/workflows/<workflow_id>/history
+```
+
+The global audit API supports pagination and filters for event/entity type, IDs, actor, worker, Job, Workflow, and UTC creation bounds. History endpoints are paginated and rate-limited.
+
+## Audit Security
+
+Audit events are inserted only by services as part of the same transaction as the state change. There are no update or delete endpoints. Global audit access is limited to operators and administrators and uses the existing JWT, RBAC, request ID, and rate-limiting layers.
 
 ## Initialize the Schema
 

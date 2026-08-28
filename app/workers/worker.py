@@ -19,6 +19,8 @@ from app.services.task_executor import TaskRegistry
 from app.services.retry_policy import RetryPolicy
 from app.services.retry_service import RetryDatabaseError, handle_task_failure
 from app.services.workflow_service import update_workflow_status
+from app.models import AuditActorType, AuditEntityType, AuditEventType
+from app.services.audit_service import record_event
 from app.sockets import publish_event
 from app.workers.registry import heartbeat_worker, register_worker, set_worker_status
 
@@ -169,6 +171,9 @@ def _complete_job(claimed: ClaimedJob) -> None:
                 worker.current_job_id = None
             set_worker_status(session, claimed.worker_id, WorkerStatus.IDLE)
             update_workflow_status(session, job.workflow_id)
+            record_event(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=claimed.worker_id, worker_id=claimed.worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": JobStatus.RUNNING.value, "to_status": JobStatus.COMPLETED.value, "reason": "attempt_succeeded"})
+            record_event(session, event_type=AuditEventType.JOB_ATTEMPT_SUCCEEDED, entity_type=AuditEntityType.JOB_ATTEMPT, entity_id=attempt.id, actor_type=AuditActorType.WORKER, actor_id=claimed.worker_id, worker_id=claimed.worker_id, job_id=job.id, workflow_id=job.workflow_id, job_attempt_id=attempt.id, details={"attempt_number": attempt.attempt_number})
+            record_event(session, event_type=AuditEventType.JOB_COMPLETED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=claimed.worker_id, worker_id=claimed.worker_id, job_id=job.id, workflow_id=job.workflow_id)
             session.commit()
     except SQLAlchemyError:
         logger.exception("Database error completing job %s", claimed.job_id)

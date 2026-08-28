@@ -13,6 +13,8 @@ from app.models import AttemptStatus, Job, JobAttempt, JobStatus, Worker, Worker
 from app.database.repositories.dead_letter_repository import create_dead_letter
 from app.services.retry_policy import RetryPolicy
 from app.workers.registry import set_worker_status
+from app.models import AuditActorType, AuditEntityType, AuditEventType
+from app.services.audit_service import record_event
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +54,11 @@ def record_failure(
     attempt.status = AttemptStatus.FAILED
     attempt.finished_at = now
     attempt.error_message = error_message
+    record_event(session, event_type=AuditEventType.JOB_ATTEMPT_FAILED, entity_type=AuditEntityType.JOB_ATTEMPT, entity_id=attempt.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, job_attempt_id=attempt.id, details={"attempt_number": attempt.attempt_number, "error_type": type(error).__name__, "retryable": job.retry_count < job.max_retries})
     decision = policy.decide(retry_count=job.retry_count, max_retries=job.max_retries, error=error)
     job.last_error = error_message
     job.updated_at = now
+    previous_status = JobStatus.RUNNING
     if decision.should_retry:
         job.status = JobStatus.RETRYING
         job.retry_count += 1
@@ -65,6 +69,7 @@ def record_failure(
         job.completed_at = now
         job.next_retry_at = None
         next_retry_at = None
+        record_event(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": previous_status.value, "to_status": job.status.value, "reason": "attempt_failed"})
         dead_letter = create_dead_letter(
             session,
             job=job,
@@ -73,7 +78,11 @@ def record_failure(
             error_message=error_message,
         )
         dead_letter_id = dead_letter.id
+        record_event(session, event_type=AuditEventType.JOB_FAILED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id)
+        record_event(session, event_type=AuditEventType.DLQ_ENTERED, entity_type=AuditEntityType.DLQ, entity_id=dead_letter.id, actor_type=AuditActorType.SYSTEM, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"attempt_number": attempt.attempt_number})
     if decision.should_retry:
+        record_event(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": previous_status.value, "to_status": job.status.value, "reason": "retry_scheduled"})
+        record_event(session, event_type=AuditEventType.JOB_RETRIED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"retry_source": "AUTOMATIC", "retry_number": job.retry_count})
         dead_letter_id = None
     set_worker_status(session, worker_id, WorkerStatus.IDLE)
     worker = session.get(Worker, worker_id)

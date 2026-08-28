@@ -7,12 +7,14 @@ import uuid
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import delete, exists, select, update
+from sqlalchemy import delete, exists, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
 from app.database.session import session_scope
 from app.models import Job, JobDependency, JobStatus
+from app.services.audit_service import record_current
+from app.models import AuditEntityType, AuditEventType
 
 logger = logging.getLogger("taskforge.dependencies")
 
@@ -84,6 +86,7 @@ def add_edges(session: Session, job: Job, dependency_ids: list[uuid.UUID], *, ma
         if _would_cycle(session, job.id, dependency_id, max_nodes=max_nodes):
             raise DependencyCycleError
         session.add(JobDependency(job_id=job.id, depends_on_job_id=dependency_id))
+        record_current(session, event_type=AuditEventType.DEPENDENCY_CREATED, entity_type=AuditEntityType.DEPENDENCY, entity_id=None, job_id=job.id, details={"depends_on_job_id": str(dependency_id)})
         logger.info("dependency_created", extra={"job_id": str(job.id), "depends_on_job_id": str(dependency_id)})
 
 
@@ -176,6 +179,7 @@ def mutate_dependency(job_id: uuid.UUID, dependency_id: uuid.UUID, *, add: bool,
                 ))
                 if not result.rowcount:
                     raise DependencyNotFoundError
+                record_current(session, event_type=AuditEventType.DEPENDENCY_REMOVED, entity_type=AuditEntityType.DEPENDENCY, job_id=job_id, details={"depends_on_job_id": str(dependency_id)})
                 logger.info("dependency_removed", extra={"job_id": str(job_id), "depends_on_job_id": str(dependency_id)})
             session.commit()
     except DependencyError:
@@ -199,5 +203,6 @@ def propagate_dependency_failure(session: Session, failed_job_id: uuid.UUID, *, 
                 dependent.status = JobStatus.CANCELLED
                 dependent.completed_at = dependent.completed_at or dependent.updated_at
                 dependent.last_error = f"Dependency job {failed_job_id} failed or was cancelled."
+                record_current(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=dependent.id, job_id=dependent.id, workflow_id=dependent.workflow_id, details={"to_status": JobStatus.CANCELLED.value, "reason": "dependency_blocked"})
                 logger.info("dependency_blocked", extra={"job_id": str(dependent.id), "depends_on_job_id": str(source_id)})
                 frontier.append((dependent.id, depth + 1))

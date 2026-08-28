@@ -15,6 +15,8 @@ from app.database.session import session_scope
 from app.models import Job, JobDependency, JobStatus, Workflow, WorkflowStatus
 from app.services.dependency_service import propagate_dependency_failure
 from app.sockets import publish_event
+from app.models import AuditEntityType, AuditEventType
+from app.services.audit_service import record_current
 
 
 class WorkflowError(RuntimeError):
@@ -38,6 +40,8 @@ def create_workflow(*, name: str, description: str | None, created_by: uuid.UUID
         with session_scope() as session:
             workflow = Workflow(name=name, description=description, created_by=created_by)
             session.add(workflow)
+            session.flush()
+            record_current(session, event_type=AuditEventType.WORKFLOW_CREATED, entity_type=AuditEntityType.WORKFLOW, entity_id=workflow.id, workflow_id=workflow.id)
             session.commit()
             session.refresh(workflow)
             session.expunge(workflow)
@@ -146,13 +150,18 @@ def update_workflow_status(session: Session, workflow_id: uuid.UUID | None) -> W
     else:
         new_status = WorkflowStatus.PENDING
     if workflow.status != new_status:
+        previous_status = workflow.status.value
         workflow.status = new_status
         workflow.updated_at = now
         if new_status == WorkflowStatus.RUNNING and workflow.started_at is None:
             workflow.started_at = now
             publish_event("workflow_started", {"workflow_id": str(workflow_id)})
+        record_current(session, event_type=AuditEventType.WORKFLOW_STATE_CHANGED, entity_type=AuditEntityType.WORKFLOW, entity_id=workflow_id, workflow_id=workflow_id, details={"from_status": previous_status, "to_status": new_status.value})
+        if new_status == WorkflowStatus.RUNNING and previous_status == WorkflowStatus.PENDING:
+            record_current(session, event_type=AuditEventType.WORKFLOW_STARTED, entity_type=AuditEntityType.WORKFLOW, entity_id=workflow_id, workflow_id=workflow_id)
         if new_status in {WorkflowStatus.SUCCEEDED, WorkflowStatus.FAILED}:
             workflow.completed_at = now
+            record_current(session, event_type=AuditEventType.WORKFLOW_COMPLETED if new_status == WorkflowStatus.SUCCEEDED else AuditEventType.WORKFLOW_FAILED, entity_type=AuditEntityType.WORKFLOW, entity_id=workflow_id, workflow_id=workflow_id)
             publish_event(f"workflow_{new_status.value.lower()}", {"workflow_id": str(workflow_id)})
     return new_status
 
@@ -166,13 +175,16 @@ def cancel_workflow(workflow_id: uuid.UUID) -> Workflow:
             if workflow.status in {WorkflowStatus.SUCCEEDED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}:
                 raise WorkflowConflictError
             workflow.status = WorkflowStatus.CANCELLED
+            record_current(session, event_type=AuditEventType.WORKFLOW_CANCELLED, entity_type=AuditEntityType.WORKFLOW, entity_id=workflow_id, workflow_id=workflow_id)
             workflow.completed_at = datetime.now(timezone.utc)
             jobs = list(session.scalars(select(Job).where(Job.workflow_id == workflow_id).with_for_update()))
             for job in jobs:
                 if job.status in {JobStatus.PENDING, JobStatus.SCHEDULED, JobStatus.RETRYING}:
+                    previous_status = job.status.value
                     job.status = JobStatus.CANCELLED
                     job.completed_at = workflow.completed_at
                     job.last_error = "Workflow was cancelled."
+                    record_current(session, event_type=AuditEventType.JOB_CANCELLED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=workflow_id, details={"previous_status": previous_status, "source": "workflow"})
                     propagate_dependency_failure(session, job.id, max_depth=50)
             session.commit()
             session.refresh(workflow)
@@ -203,6 +215,7 @@ def retry_workflow(workflow_id: uuid.UUID) -> Workflow:
                 job.last_error = None
                 job.next_retry_at = None
             workflow.status = WorkflowStatus.RUNNING
+            record_current(session, event_type=AuditEventType.WORKFLOW_RETRIED, entity_type=AuditEntityType.WORKFLOW, entity_id=workflow_id, workflow_id=workflow_id)
             workflow.completed_at = None
             workflow.started_at = workflow.started_at or datetime.now(timezone.utc)
             session.commit()

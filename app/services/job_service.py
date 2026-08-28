@@ -18,6 +18,8 @@ from app.database.repositories.job_repository import (
 from app.database.session import session_scope
 from app.models import DeadLetterJob, Job, JobStatus, Workflow
 from app.services.dependency_service import add_edges, propagate_dependency_failure
+from app.services.audit_service import record_current
+from app.models import AuditEntityType, AuditEventType
 from app.sockets import publish_event
 
 logger = logging.getLogger("taskforge.jobs")
@@ -76,6 +78,7 @@ def create_job(
                 raise JobNotFoundError("Workflow not found")
             add_job(session, job)
             add_edges(session, job, dependency_ids or [], max_nodes=max_dependency_graph_nodes)
+            record_current(session, event_type=AuditEventType.JOB_CREATED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id)
             session.commit()
     except JobNotFoundError:
         raise
@@ -150,7 +153,10 @@ def cancel_job(job_id: uuid.UUID, *, max_dependency_propagation_depth: int = 50)
                 raise JobNotFoundError
             if job.status not in CANCELLABLE_STATUSES:
                 raise JobStateConflictError(job.status)
+            previous_status = job.status.value
             job.status = JobStatus.CANCELLED
+            record_current(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": previous_status, "to_status": JobStatus.CANCELLED.value, "reason": "job_cancelled"})
+            record_current(session, event_type=AuditEventType.JOB_CANCELLED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"previous_status": previous_status})
             propagate_dependency_failure(session, job.id, max_depth=max_dependency_propagation_depth)
             session.commit()
             session.refresh(job)
@@ -178,10 +184,13 @@ def bulk_cancel_jobs(job_ids: list[uuid.UUID], *, max_dependency_propagation_dep
                 if job.status not in CANCELLABLE_STATUSES:
                     results.append({"job_id": str(job_id), "status": "not_cancellable", "reason": f"Job is {job.status.value}."})
                     continue
+                previous_status = job.status.value
                 job.status = JobStatus.CANCELLED
+                record_current(session, event_type=AuditEventType.JOB_CANCELLED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"previous_status": previous_status, "source": "bulk"})
                 job.completed_at = datetime.now(timezone.utc)
                 propagate_dependency_failure(session, job.id, max_depth=max_dependency_propagation_depth)
                 results.append({"job_id": str(job_id), "status": "cancelled"})
+            record_current(session, event_type=AuditEventType.BULK_JOB_CANCEL, entity_type=AuditEntityType.SYSTEM, details={"requested_count": len(job_ids), "successful_count": sum(result["status"] == "cancelled" for result in results), "failed_count": sum(result["status"] != "cancelled" for result in results)})
             session.commit()
     except SQLAlchemyError as exc:
         raise JobDatabaseError from exc
@@ -204,8 +213,10 @@ def bulk_retry_jobs(job_ids: list[uuid.UUID]) -> list[dict[str, Any]]:
                 job.completed_at = None
                 job.last_error = None
                 job.next_retry_at = None
+                record_current(session, event_type=AuditEventType.JOB_RETRIED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"retry_source": "USER"})
                 session.query(DeadLetterJob).filter(DeadLetterJob.job_id == job.id).delete(synchronize_session=False)
                 results.append({"job_id": str(job_id), "status": "retrying"})
+            record_current(session, event_type=AuditEventType.BULK_JOB_RETRY, entity_type=AuditEntityType.SYSTEM, details={"requested_count": len(job_ids), "successful_count": sum(result["status"] == "retrying" for result in results), "failed_count": sum(result["status"] != "retrying" for result in results)})
             session.commit()
     except SQLAlchemyError as exc:
         raise JobDatabaseError from exc

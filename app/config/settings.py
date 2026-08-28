@@ -59,6 +59,7 @@ class Settings:
     max_dependency_graph_nodes: int
     max_dependency_propagation_depth: int
     max_bulk_job_operations: int
+    audit_retention_days: int
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -129,6 +130,7 @@ class Settings:
             max_dependency_graph_nodes=_parse_bounded_int("MAX_DEPENDENCY_GRAPH_NODES", default=1000, maximum=100000),
             max_dependency_propagation_depth=_parse_bounded_int("MAX_DEPENDENCY_PROPAGATION_DEPTH", default=50, maximum=1000),
             max_bulk_job_operations=_parse_bounded_int("MAX_BULK_JOB_OPERATIONS", default=100, maximum=1000),
+            audit_retention_days=_parse_non_negative_bounded_int("AUDIT_RETENTION_DAYS", default=0, maximum=3650),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False
@@ -196,6 +198,19 @@ def _parse_bounded_int(name: str, default: int, maximum: int) -> int:
     parsed = _parse_positive_int(name, default)
     if parsed > maximum:
         raise ConfigurationError(f"{name} must be no greater than {maximum}.")
+    return parsed
+
+
+def _parse_non_negative_bounded_int(name: str, default: int, maximum: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must be a non-negative integer.") from exc
+    if parsed < 0 or parsed > maximum:
+        raise ConfigurationError(f"{name} must be between 0 and {maximum}.")
     return parsed
 
 

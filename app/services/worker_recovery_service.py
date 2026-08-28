@@ -15,6 +15,8 @@ from app.database.session import session_scope
 from app.models import AttemptStatus, Job, JobAttempt, JobStatus, Worker, WorkerStatus
 from app.services.retry_policy import RetryPolicy
 from app.sockets import publish_event
+from app.models import AuditActorType, AuditEntityType, AuditEventType
+from app.services.audit_service import record_event
 
 logger = logging.getLogger("taskforge.worker_recovery")
 
@@ -54,6 +56,7 @@ def recover_stale_workers(*, stale_timeout: float, policy: RetryPolicy) -> list[
                 if worker.last_heartbeat_at is None or worker.last_heartbeat_at >= cutoff:
                     continue
                 worker.status = WorkerStatus.STALE
+                record_event(session, event_type=AuditEventType.WORKER_MARKED_STALE, entity_type=AuditEntityType.WORKER, entity_id=worker.id, actor_type=AuditActorType.SYSTEM, worker_id=worker.id, details={"reason": "heartbeat_timeout"})
                 worker.updated_at = datetime.now(timezone.utc)
                 attempts = list(
                     session.scalars(
@@ -74,6 +77,7 @@ def recover_stale_workers(*, stale_timeout: float, policy: RetryPolicy) -> list[
                     attempt.finished_at = now
                     attempt.error_message = "Worker heartbeat timed out"
                     attempt.last_heartbeat_at = worker.last_heartbeat_at
+                    record_event(session, event_type=AuditEventType.JOB_ATTEMPT_FAILED, entity_type=AuditEntityType.JOB_ATTEMPT, entity_id=attempt.id, actor_type=AuditActorType.SYSTEM, worker_id=worker.id, job_id=job.id, job_attempt_id=attempt.id, details={"attempt_number": attempt.attempt_number, "error_type": "WORKER_LOST", "retryable": job.retry_count < job.max_retries})
                     decision = policy.decide(
                         retry_count=job.retry_count,
                         max_retries=job.max_retries,
@@ -98,6 +102,8 @@ def recover_stale_workers(*, stale_timeout: float, policy: RetryPolicy) -> list[
                             error_message="Worker heartbeat timed out",
                         )
                         dead_letter_id = record.id
+                        record_event(session, event_type=AuditEventType.JOB_FAILED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.SYSTEM, worker_id=worker.id, job_id=job.id)
+                        record_event(session, event_type=AuditEventType.DLQ_ENTERED, entity_type=AuditEntityType.DLQ, entity_id=record.id, actor_type=AuditActorType.SYSTEM, worker_id=worker.id, job_id=job.id, details={"attempt_number": attempt.attempt_number})
                     if worker.current_job_id == job.id:
                         worker.current_job_id = None
                     outcomes.append(RecoveryOutcome(job.id, worker.id, attempt.id, job.status, dead_letter_id))

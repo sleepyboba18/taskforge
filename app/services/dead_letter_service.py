@@ -18,6 +18,8 @@ from app.database.repositories.dead_letter_repository import (
 from app.database.session import session_scope
 from app.models import DeadLetterJob, Job, JobStatus
 from app.sockets import publish_event
+from app.models import AuditEntityType, AuditEventType
+from app.services.audit_service import record_current
 
 logger = logging.getLogger("taskforge.dead_letters")
 
@@ -84,6 +86,8 @@ def retry_dead_letter(dead_letter_id: uuid.UUID) -> Job:
             if job.status != JobStatus.FAILED:
                 raise DeadLetterConflictError
             session.delete(record)
+            record_current(session, event_type=AuditEventType.DLQ_RETRIED, entity_type=AuditEntityType.DLQ, entity_id=record.id, job_id=job.id, workflow_id=job.workflow_id, details={"reason": "manual_retry"})
+            record_current(session, event_type=AuditEventType.JOB_RETRIED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"retry_source": "DLQ"})
             job.status = JobStatus.PENDING
             job.retry_count = 0
             job.next_retry_at = None
@@ -115,6 +119,7 @@ def delete_dead_letter(dead_letter_id: uuid.UUID) -> None:
             if record is None:
                 raise DeadLetterNotFoundError
             session.delete(record)
+            record_current(session, event_type=AuditEventType.DLQ_DISCARDED, entity_type=AuditEntityType.DLQ, entity_id=record.id, job_id=record.job_id, details={"reason": "manual_delete"})
             session.commit()
     except DeadLetterNotFoundError:
         raise

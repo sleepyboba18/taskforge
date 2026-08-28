@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models import AttemptStatus, JobAttempt, Worker, WorkerStatus
+from app.models import AuditActorType, AuditEntityType, AuditEventType
+from app.services.audit_service import record_event
 from sqlalchemy import update
 
 
@@ -31,6 +33,7 @@ def register_worker(
     )
     session.add(worker)
     session.flush()
+    record_event(session, event_type=AuditEventType.WORKER_REGISTERED, entity_type=AuditEntityType.WORKER, entity_id=worker.id, actor_type=AuditActorType.WORKER, actor_id=worker.id, worker_id=worker.id, details={"hostname": hostname, "process_id": process_id})
     return worker
 
 
