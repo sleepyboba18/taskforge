@@ -64,6 +64,7 @@ class Settings:
     queue_backlog_warning_threshold: int
     dlq_backlog_warning_threshold: int
     worker_saturation_threshold_percent: int
+    admin_bulk_action_limit: int
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -139,6 +140,7 @@ class Settings:
             queue_backlog_warning_threshold=_parse_non_negative_bounded_int("QUEUE_BACKLOG_WARNING_THRESHOLD", default=100, maximum=1000000),
             dlq_backlog_warning_threshold=_parse_non_negative_bounded_int("DLQ_BACKLOG_WARNING_THRESHOLD", default=50, maximum=1000000),
             worker_saturation_threshold_percent=_parse_bounded_int("WORKER_SATURATION_THRESHOLD_PERCENT", default=90, maximum=100),
+            admin_bulk_action_limit=_parse_bounded_int("ADMIN_BULK_ACTION_LIMIT", default=100, maximum=1000),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False

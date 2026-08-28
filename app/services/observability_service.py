@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import aliased
 
 from app.database.session import check_database_connection, session_scope
-from app.models import AttemptStatus, AuditEvent, DeadLetterJob, Job, JobAttempt, JobDependency, JobStatus, Worker, WorkerStatus, Workflow, WorkflowStatus
+from app.models import AttemptStatus, AuditEvent, AuditEventType, DeadLetterJob, Job, JobAttempt, JobDependency, JobStatus, Worker, WorkerStatus, Workflow, WorkflowStatus
 
 logger = logging.getLogger("taskforge.observability")
 
@@ -82,6 +82,7 @@ def collect_metrics(*, window: str) -> dict[str, Any]:
             total_workers = session.scalar(select(func.count()).select_from(Worker)) or 0
             workflow_counts = dict(session.execute(select(Workflow.status, func.count()).group_by(Workflow.status)).all())
             audit_events_total = session.scalar(select(func.count()).select_from(AuditEvent)) or 0
+            admin_actions_total = session.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.event_type.in_([AuditEventType.QUEUE_PAUSED, AuditEventType.QUEUE_RESUMED, AuditEventType.BULK_JOB_CANCEL, AuditEventType.BULK_JOB_RETRY, AuditEventType.ADMIN_ACTION]))) or 0
             dependency_edges = session.scalar(select(func.count()).select_from(JobDependency)) or 0
             dependency_parent = aliased(Job)
             dependency_waiting = session.scalar(
@@ -149,7 +150,7 @@ def collect_metrics(*, window: str) -> dict[str, Any]:
                     "failed": workflow_counts.get(WorkflowStatus.FAILED, 0),
                     "cancelled": workflow_counts.get(WorkflowStatus.CANCELLED, 0),
                 },
-                "audit": {"events_total": audit_events_total},
+                "audit": {"events_total": audit_events_total, "admin_actions_total": admin_actions_total},
             }
     except (SQLAlchemyError, KeyError) as exc:
         logger.exception("Metrics aggregation failed")

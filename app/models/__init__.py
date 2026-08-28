@@ -11,6 +11,7 @@ from app.models.rate_limit import RateLimitRecord
 from app.models.job_dependency import JobDependency
 from app.models.workflow import Workflow, WorkflowStatus
 from app.models.audit_event import AuditActorType, AuditEntityType, AuditEvent, AuditEventType
+from app.models.system_setting import SystemSetting
 
 __all__ = [
 	"AttemptStatus",
@@ -31,4 +32,5 @@ __all__ = [
 	"AuditEntityType",
 	"AuditEvent",
 	"AuditEventType",
+	"SystemSetting",
 ]

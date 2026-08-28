@@ -111,6 +111,33 @@ def retry_dead_letter(dead_letter_id: uuid.UUID) -> Job:
     return job
 
 
+def requeue_job_by_id(job_id: uuid.UUID, *, reason: str | None = None) -> Job:
+    try:
+        with session_scope() as session:
+            record = session.scalar(select(DeadLetterJob).where(DeadLetterJob.job_id == job_id).with_for_update())
+            if record is None:
+                raise DeadLetterNotFoundError
+            job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+            if job is None or job.status != JobStatus.FAILED:
+                raise DeadLetterConflictError
+            session.delete(record)
+            job.status = JobStatus.PENDING
+            job.retry_count = 0
+            job.next_retry_at = None
+            job.started_at = None
+            job.completed_at = None
+            job.worker_id = None
+            record_current(session, event_type=AuditEventType.DLQ_REQUEUED, entity_type=AuditEntityType.DLQ, entity_id=record.id, job_id=job.id, workflow_id=job.workflow_id, details={"reason": reason or "admin_requeue"})
+            session.commit()
+            session.refresh(job)
+            session.expunge(job)
+            return job
+    except (DeadLetterNotFoundError, DeadLetterConflictError):
+        raise
+    except SQLAlchemyError as exc:
+        raise DeadLetterDatabaseError from exc
+
+
 def delete_dead_letter(dead_letter_id: uuid.UUID) -> None:
     """Delete only the DLQ management record, preserving Job history."""
     try:

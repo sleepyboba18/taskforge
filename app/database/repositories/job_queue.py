@@ -14,6 +14,7 @@ from app.models import AttemptStatus, Job, JobAttempt, JobDependency, JobStatus,
 from app.services.workflow_service import update_workflow_status
 from app.models import AuditActorType, AuditEntityType, AuditEventType
 from app.services.audit_service import record_event
+from app.services.admin_service import queue_is_paused
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,8 @@ class ClaimedJob:
 
 def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
     """Atomically claim the highest-priority eligible job with SKIP LOCKED."""
+    if queue_is_paused(session):
+        return None
     dependency_parent = aliased(Job)
     statement = (
         select(Job)

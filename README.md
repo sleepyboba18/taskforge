@@ -216,6 +216,55 @@ The monitoring response derives non-persistent `INFO`, `WARNING`, and `CRITICAL`
 
 Configure thresholds in `.env` with `LONG_RUNNING_JOB_THRESHOLD_SECONDS`, `QUEUE_BACKLOG_WARNING_THRESHOLD`, `DLQ_BACKLOG_WARNING_THRESHOLD`, and `WORKER_SATURATION_THRESHOLD_PERCENT`. Monitoring failures return a controlled `MONITORING_UNAVAILABLE` response and never expose SQLAlchemy errors, connection strings, secrets, or Job payloads.
 
+## Administrative Operations
+
+Operational controls are available under `/api/v1/admin` and require an authenticated `OPERATOR` or `ADMIN`. Every state-changing control is validated, rate-limited, logged, and persisted in the PostgreSQL audit trail. Administrative controls are explicit actions; monitoring never performs automatic remediation.
+
+## Administrative Permissions
+
+The existing RBAC model remains authoritative. Operators and administrators can control the queue, cancel or retry eligible Jobs, requeue DLQ Jobs, and use bounded bulk actions. Viewers cannot perform administrative operations.
+
+## Queue Controls
+
+```text
+POST /api/v1/admin/queue/pause
+POST /api/v1/admin/queue/resume
+GET  /api/v1/admin/queue/status
+```
+
+Queue pause state is stored in PostgreSQL and checked before worker claims. Running Jobs continue; pending and scheduled Jobs remain persisted. Pause and resume are idempotent and return `already_paused` or `already_running` when appropriate.
+
+## Job Controls
+
+```text
+POST /api/v1/admin/jobs/<job_id>/cancel
+POST /api/v1/admin/jobs/<job_id>/retry
+POST /api/v1/admin/jobs/cancel
+POST /api/v1/admin/jobs/retry
+```
+
+Single-Job actions reuse the existing Job state machine and accept an optional sanitized `reason` of up to 500 characters. Bulk actions accept bounded unique UUID lists and return per-Job partial results; they do not bypass retry, cancellation, dependency, or DLQ rules.
+
+## DLQ Controls
+
+```text
+POST /api/v1/admin/dlq/<job_id>/requeue
+```
+
+DLQ requeue locks the DLQ record and Job in one transaction, removes only the active DLQ entry, and returns the Job to the existing lifecycle. It does not create a duplicate Job.
+
+## Worker Recovery
+
+Worker recovery remains owned by the existing stale-worker recovery service. This module does not add a force-kill endpoint or automatically terminate healthy workers.
+
+## Scheduler Controls
+
+Scheduler polling remains owned by the existing scheduler processes. No second scheduler or unsafe refresh mechanism is introduced.
+
+## Administrative Safety
+
+Administrative status is available at `GET /api/v1/admin/status` and reuses monitoring data. State changes use short PostgreSQL transactions, row locks where needed, existing request IDs, and audit records. Secrets, tokens, credentials, and Job payloads are never accepted as audit metadata or returned by these APIs.
+
 ## Initialize the Schema
 
 After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:

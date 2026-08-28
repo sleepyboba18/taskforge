@@ -144,7 +144,7 @@ def list_jobs(
         raise JobDatabaseError from exc
 
 
-def cancel_job(job_id: uuid.UUID, *, max_dependency_propagation_depth: int = 50) -> Job:
+def cancel_job(job_id: uuid.UUID, *, max_dependency_propagation_depth: int = 50, reason: str | None = None) -> Job:
     """Lock and cancel an eligible job atomically."""
     try:
         with session_scope() as session:
@@ -156,7 +156,7 @@ def cancel_job(job_id: uuid.UUID, *, max_dependency_propagation_depth: int = 50)
             previous_status = job.status.value
             job.status = JobStatus.CANCELLED
             record_current(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": previous_status, "to_status": JobStatus.CANCELLED.value, "reason": "job_cancelled"})
-            record_current(session, event_type=AuditEventType.JOB_CANCELLED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"previous_status": previous_status})
+            record_current(session, event_type=AuditEventType.JOB_CANCELLED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"previous_status": previous_status, "reason": reason or "job_cancelled"})
             propagate_dependency_failure(session, job.id, max_depth=max_dependency_propagation_depth)
             session.commit()
             session.refresh(job)
