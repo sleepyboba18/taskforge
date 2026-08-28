@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 from app.api.serializers import job_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED, OPERATORS
+from app.rate_limit import rate_limit
 from app.models import JobStatus
 from app.services.job_service import (
     JobDatabaseError,
@@ -30,6 +31,7 @@ DEFAULT_PER_PAGE = 20
 
 @jobs_bp.post("")
 @require_roles(*OPERATORS)
+@rate_limit("write")
 def submit_job():
     """Validate and persist a new job."""
     body = request.get_json(silent=True)
@@ -49,6 +51,7 @@ def submit_job():
 
 @jobs_bp.get("")
 @require_roles(*AUTHENTICATED)
+@rate_limit("read")
 def get_jobs():
     """Return a filtered, database-paginated job collection."""
     values, errors = _validate_list_query(request.args)
@@ -76,6 +79,7 @@ def get_jobs():
 
 @jobs_bp.get("/<job_id>")
 @require_roles(*AUTHENTICATED)
+@rate_limit("read")
 def get_job(job_id: str):
     """Return one job by UUID."""
     parsed_id, error = _parse_uuid(job_id)
@@ -92,6 +96,7 @@ def get_job(job_id: str):
 
 @jobs_bp.post("/<job_id>/cancel")
 @require_roles(*OPERATORS)
+@rate_limit("write")
 def cancel_job_endpoint(job_id: str):
     """Cancel a not-yet-running job using a locked state transition."""
     parsed_id, error = _parse_uuid(job_id)

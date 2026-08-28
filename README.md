@@ -58,6 +58,41 @@ Authenticated users can query `GET /api/v1/health` for database, worker, schedul
 
 Every HTTP response includes an `X-Request-ID`. A valid client-supplied request ID is reused; otherwise TaskForge generates a UUID. Request timing and slow requests are logged without request bodies, passwords, JWTs, authorization headers, database URLs, or other secrets. Configure `LOG_LEVEL`, `SLOW_REQUEST_THRESHOLD_MS`, and `METRICS_DEFAULT_WINDOW` in `.env`.
 
+## Rate Limiting
+
+TaskForge applies fixed-window, PostgreSQL-backed rate limiting to external API routes. Authenticated requests use a stable user ID bucket; unauthenticated requests use the direct Flask client address. Proxy headers are not trusted unless proxy handling is explicitly added to the deployment configuration. Public `/health` and `/ready` remain available without JWT authentication and are not subject to normal user API limits.
+
+## Rate Limit Configuration
+
+Rate limiting is enabled by default and can be configured in `.env`:
+
+```text
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=60
+RATE_LIMIT_WINDOW_SECONDS=60
+LOGIN_RATE_LIMIT_REQUESTS=10
+LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
+RATE_LIMIT_ADMIN=300
+RATE_LIMIT_OPERATOR=120
+RATE_LIMIT_VIEWER=60
+RATE_LIMIT_RETENTION_SECONDS=3600
+RATE_LIMIT_FAIL_OPEN=false
+```
+
+The login policy is separate and intentionally stricter. `RATE_LIMIT_FAIL_OPEN=false` rejects protected API requests with a controlled service error when PostgreSQL rate-limit state is unavailable. Set it to `true` only when temporary degraded operation is preferred. Rate-limit records are short-lived operational state and can be removed with `app.rate_limit.service.cleanup` from an existing maintenance process.
+
+## Rate Limit Responses
+
+Allowed responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Exceeded requests return JSON with `error.code` set to `rate_limit_exceeded`, status `429 Too Many Requests`, and a non-negative `Retry-After` value. Rate-limit persistence failures return `rate_limit_unavailable` without exposing database details.
+
+## Authentication Limits
+
+`POST /api/v1/auth/login` is limited before password verification, so repeated invalid credentials cannot trigger unlimited password-hash work. Invalid JWT traffic is still assigned an unauthenticated client bucket by protected route authentication ordering.
+
+## Role-Based Limits
+
+Authenticated route buckets use the role loaded from PostgreSQL, never a request body field. `ADMIN`, `OPERATOR`, and `VIEWER` limits are configurable independently. Route categories distinguish `AUTH`, `READ`, `WRITE`, and `ADMIN`; authorization remains separate, so an authorized request receives `403 Forbidden` when permissions are insufficient and `429` only after exceeding its configured limit.
+
 ## Initialize the Schema
 
 After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:

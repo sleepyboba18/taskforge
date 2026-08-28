@@ -44,6 +44,16 @@ class Settings:
     log_level: str
     slow_request_threshold_ms: int
     metrics_default_window: str
+    rate_limit_enabled: bool
+    rate_limit_requests: int
+    rate_limit_window_seconds: int
+    login_rate_limit_requests: int
+    login_rate_limit_window_seconds: int
+    rate_limit_admin: int
+    rate_limit_operator: int
+    rate_limit_viewer: int
+    rate_limit_retention_seconds: int
+    rate_limit_fail_open: bool
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -99,6 +109,16 @@ class Settings:
                 "SLOW_REQUEST_THRESHOLD_MS", default=1000, maximum=600000
             ),
             metrics_default_window=os.getenv("METRICS_DEFAULT_WINDOW", "24h").strip().lower(),
+            rate_limit_enabled=_parse_bool("RATE_LIMIT_ENABLED", default=True),
+            rate_limit_requests=_parse_bounded_int("RATE_LIMIT_REQUESTS", default=60, maximum=100000),
+            rate_limit_window_seconds=_parse_bounded_int("RATE_LIMIT_WINDOW_SECONDS", default=60, maximum=86400),
+            login_rate_limit_requests=_parse_bounded_int("LOGIN_RATE_LIMIT_REQUESTS", default=10, maximum=10000),
+            login_rate_limit_window_seconds=_parse_bounded_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", default=60, maximum=86400),
+            rate_limit_admin=_parse_bounded_int("RATE_LIMIT_ADMIN", default=300, maximum=100000),
+            rate_limit_operator=_parse_bounded_int("RATE_LIMIT_OPERATOR", default=120, maximum=100000),
+            rate_limit_viewer=_parse_bounded_int("RATE_LIMIT_VIEWER", default=60, maximum=100000),
+            rate_limit_retention_seconds=_parse_bounded_int("RATE_LIMIT_RETENTION_SECONDS", default=3600, maximum=604800),
+            rate_limit_fail_open=_parse_bool("RATE_LIMIT_FAIL_OPEN", default=False),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False

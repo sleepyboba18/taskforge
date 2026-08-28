@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ class OneTimeSchedulingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = create_app()
+        cls.app.config["TASKFORGE_SETTINGS"] = replace(cls.app.config["TASKFORGE_SETTINGS"], rate_limit_enabled=False)
         cls.client = cls.app.test_client()
         cls.user = User(id=uuid.uuid4(), username="operator", email="operator@example.com", password_hash="hash", role=UserRole.OPERATOR, is_active=True)
 

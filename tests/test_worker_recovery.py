@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import unittest
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ class WorkerHealthApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = create_app()
+        cls.app.config["TASKFORGE_SETTINGS"] = replace(cls.app.config["TASKFORGE_SETTINGS"], rate_limit_enabled=False)
         cls.client = cls.app.test_client()
         cls.user = User(id=uuid.uuid4(), username="viewer", email="viewer@example.com", password_hash="hash", role=UserRole.VIEWER, is_active=True)
 

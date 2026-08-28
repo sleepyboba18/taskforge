@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from dataclasses import replace
 from unittest.mock import patch
 
 from app import create_app
@@ -14,6 +15,7 @@ class ObservabilityRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = create_app()
+        cls.app.config["TASKFORGE_SETTINGS"] = replace(cls.app.config["TASKFORGE_SETTINGS"], rate_limit_enabled=False)
         cls.client = cls.app.test_client()
         cls.viewer = User(
             id=uuid.uuid4(), username="viewer", email="viewer@example.com",
@@ -57,6 +59,7 @@ class ObservabilityRouteTests(unittest.TestCase):
             response = self.client.get("/api/v1/metrics?window=24h")
         self.assertEqual(200, response.status_code)
         self.assertEqual("24h", response.get_json()["data"]["window"])
+        self.assertTrue(response.get_json()["data"]["rate_limiting"]["enabled"] is False)
 
         response = self.client.get("/api/v1/metrics?window=30d")
         self.assertEqual(400, response.status_code)

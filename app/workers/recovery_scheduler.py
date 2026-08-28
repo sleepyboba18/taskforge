@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from app.database.session import dispose_database, initialize_database
+from app.rate_limit.service import cleanup
 from app.services.retry_policy import RetryPolicy
 from app.services.worker_recovery_service import RecoveryDatabaseError, recover_stale_workers
 
@@ -14,6 +15,7 @@ logger = logging.getLogger("taskforge.recovery_scheduler")
 def run_recovery_scheduler(
     *, database_url: str, poll_interval: float, stale_timeout: float,
     retry_base_delay: float, retry_max_delay: float, shutdown_event,
+    rate_limit_retention_seconds: int = 3600,
 ) -> None:
     """Poll PostgreSQL for stale workers without executing tasks."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -26,6 +28,7 @@ def run_recovery_scheduler(
             outcomes = recover_stale_workers(stale_timeout=stale_timeout, policy=policy)
             if outcomes:
                 logger.info("Recovered %d abandoned job(s)", len(outcomes))
+            cleanup(retention_seconds=rate_limit_retention_seconds)
         except RecoveryDatabaseError:
             logger.exception("Recovery scheduler database error")
         shutdown_event.wait(poll_interval)

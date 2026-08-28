@@ -18,12 +18,14 @@ from app.services.recurring_job_service import (
 from app.services.recurring_schedule_service import ScheduleValidationError
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED, OPERATORS
+from app.rate_limit import rate_limit
 
 recurring_jobs_bp = Blueprint("recurring_jobs", __name__, url_prefix="/api/v1/recurring-jobs")
 
 
 @recurring_jobs_bp.post("")
 @require_roles(*OPERATORS)
+@rate_limit("write")
 def create_recurring_job_endpoint():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
@@ -42,6 +44,7 @@ def create_recurring_job_endpoint():
 
 @recurring_jobs_bp.get("")
 @require_roles(*AUTHENTICATED)
+@rate_limit("read")
 def list_recurring_job_endpoint():
     enabled_value = request.args.get("enabled")
     enabled = None
@@ -58,6 +61,7 @@ def list_recurring_job_endpoint():
 
 @recurring_jobs_bp.get("/<recurring_job_id>")
 @require_roles(*AUTHENTICATED)
+@rate_limit("read")
 def get_recurring_job_endpoint(recurring_job_id: str):
     parsed_id, error = _parse_uuid(recurring_job_id)
     if error:
@@ -73,12 +77,14 @@ def get_recurring_job_endpoint(recurring_job_id: str):
 
 @recurring_jobs_bp.post("/<recurring_job_id>/disable")
 @require_roles(*OPERATORS)
+@rate_limit("write")
 def disable_recurring_job_endpoint(recurring_job_id: str):
     return _set_enabled(recurring_job_id, False)
 
 
 @recurring_jobs_bp.post("/<recurring_job_id>/enable")
 @require_roles(*OPERATORS)
+@rate_limit("write")
 def enable_recurring_job_endpoint(recurring_job_id: str):
     return _set_enabled(recurring_job_id, True)
 

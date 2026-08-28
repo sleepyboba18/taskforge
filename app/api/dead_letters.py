@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 from app.api.serializers import dead_letter_to_dict, job_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED, OPERATORS
+from app.rate_limit import rate_limit
 from app.services.dead_letter_service import (
     DeadLetterConflictError,
     DeadLetterDatabaseError,
@@ -29,6 +30,7 @@ MAX_PER_PAGE = 100
 
 @dead_letters_bp.get("")
 @require_roles(*AUTHENTICATED)
+@rate_limit("read")
 def list_dead_letter_endpoint():
     page, per_page, errors = _pagination(request.args)
     if errors:
@@ -62,6 +64,7 @@ def list_dead_letter_endpoint():
 
 @dead_letters_bp.get("/<dead_letter_id>")
 @require_roles(*AUTHENTICATED)
+@rate_limit("read")
 def get_dead_letter_endpoint(dead_letter_id: str):
     parsed_id, error = _parse_uuid(dead_letter_id)
     if error:
@@ -77,6 +80,7 @@ def get_dead_letter_endpoint(dead_letter_id: str):
 
 @dead_letters_bp.post("/<dead_letter_id>/retry")
 @require_roles(*OPERATORS)
+@rate_limit("write")
 def retry_dead_letter_endpoint(dead_letter_id: str):
     parsed_id, error = _parse_uuid(dead_letter_id)
     if error:
@@ -94,6 +98,7 @@ def retry_dead_letter_endpoint(dead_letter_id: str):
 
 @dead_letters_bp.delete("/<dead_letter_id>")
 @require_roles(*OPERATORS)
+@rate_limit("admin")
 def delete_dead_letter_endpoint(dead_letter_id: str):
     parsed_id, error = _parse_uuid(dead_letter_id)
     if error:

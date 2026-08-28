@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, request
 
 from app.auth.decorators import require_role
 from app.auth.password import validate_password
+from app.rate_limit import rate_limit
 from app.models import UserRole
 from app.services.user_service import (
     UserAlreadyExistsError,
@@ -25,6 +26,7 @@ users_bp = Blueprint("users", __name__, url_prefix="/api/v1/users")
 
 @users_bp.get("")
 @require_role(UserRole.ADMIN)
+@rate_limit("admin")
 def list_users_endpoint():
     try:
         users = list_users()
@@ -35,6 +37,7 @@ def list_users_endpoint():
 
 @users_bp.get("/<user_id>")
 @require_role(UserRole.ADMIN)
+@rate_limit("admin")
 def get_user_endpoint(user_id: str):
     try:
         user = get_user(uuid.UUID(user_id))
@@ -49,6 +52,7 @@ def get_user_endpoint(user_id: str):
 
 @users_bp.post("")
 @require_role(UserRole.ADMIN)
+@rate_limit("admin")
 def create_user_endpoint():
     body = request.get_json(silent=True)
     values, errors = _validate_create(body)
@@ -65,6 +69,7 @@ def create_user_endpoint():
 
 @users_bp.patch("/<user_id>")
 @require_role(UserRole.ADMIN)
+@rate_limit("admin")
 def update_user_endpoint(user_id: str):
     try:
         parsed_id = uuid.UUID(user_id)

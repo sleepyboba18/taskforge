@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from dataclasses import replace
 from unittest.mock import patch
 
 from app import create_app
@@ -15,6 +16,7 @@ class AuthRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = create_app()
+        cls.app.config["TASKFORGE_SETTINGS"] = replace(cls.app.config["TASKFORGE_SETTINGS"], rate_limit_enabled=False)
         cls.client = cls.app.test_client()
         cls.user = User(
             id=uuid.uuid4(), username="operator", email="operator@example.com",
@@ -59,6 +61,7 @@ class AuthorizationRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = create_app()
+        cls.app.config["TASKFORGE_SETTINGS"] = replace(cls.app.config["TASKFORGE_SETTINGS"], rate_limit_enabled=False)
         cls.client = cls.app.test_client()
 
     def test_viewer_cannot_submit_job(self) -> None:

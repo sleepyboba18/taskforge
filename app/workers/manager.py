@@ -97,6 +97,7 @@ class WorkerManager:
                 "stale_timeout": self.settings.worker_stale_timeout,
                 "retry_base_delay": self.settings.retry_base_delay,
                 "retry_max_delay": self.settings.retry_max_delay,
+                "rate_limit_retention_seconds": self.settings.rate_limit_retention_seconds,
                 "shutdown_event": self._shutdown_event,
             },
             name="taskforge-recovery-scheduler",
