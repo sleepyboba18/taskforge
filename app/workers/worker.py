@@ -159,6 +159,16 @@ def _fail_job(claimed: ClaimedJob, error: Exception, policy: RetryPolicy) -> Non
         )
     else:
         publish_event("job:failed", _job_event(claimed, JobStatus.FAILED))
+        if outcome.dead_letter_id is not None:
+            publish_event(
+                "job:dead_lettered",
+                {
+                    "job_id": str(outcome.job_id),
+                    "dead_letter_id": str(outcome.dead_letter_id),
+                    "status": JobStatus.FAILED.value,
+                    "attempt_count": outcome.attempt_number,
+                },
+            )
         logger.info("Retry exhausted or unavailable: %s", outcome.job_id)
 
 

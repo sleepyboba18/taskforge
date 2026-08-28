@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.models import Job
+from app.models import DeadLetterJob
 
 
 def job_to_dict(job: Job) -> dict[str, Any]:
@@ -32,3 +33,22 @@ def job_to_dict(job: Job) -> dict[str, Any]:
 
 def _isoformat(value: Any) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def dead_letter_to_dict(record: DeadLetterJob) -> dict[str, Any]:
+    """Convert a DLQ record to a JSON-safe public representation."""
+    return {
+        "id": str(record.id),
+        "job_id": str(record.job_id),
+        "task_type": record.task_type,
+        "payload": record.payload,
+        "error_type": record.error_type,
+        "error_message": record.error_message,
+        "attempt_count": record.attempt_count,
+        "last_attempt_id": str(record.last_attempt_id) if record.last_attempt_id else None,
+        "failed_at": _isoformat(record.failed_at),
+        "source": record.source,
+        "recurring_job_id": str(record.recurring_job_id) if record.recurring_job_id else None,
+        "created_at": _isoformat(record.created_at),
+        "updated_at": _isoformat(record.updated_at),
+    }

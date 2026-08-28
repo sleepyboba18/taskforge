@@ -14,7 +14,10 @@ from app.models import AttemptStatus, Job, JobAttempt, JobStatus, Worker, Worker
 
 class ModelMetadataTests(unittest.TestCase):
     def test_all_models_are_registered(self) -> None:
-        self.assertEqual({"jobs", "job_attempts", "workers", "recurring_jobs"}, set(Base.metadata.tables))
+        self.assertEqual(
+            {"jobs", "job_attempts", "workers", "recurring_jobs", "dead_letter_jobs"},
+            set(Base.metadata.tables),
+        )
 
     def test_uuid_defaults_are_uuid_factories(self) -> None:
         self.assertIsInstance(Job.id.default.arg(None), uuid.UUID)
@@ -31,7 +34,10 @@ class ModelMetadataTests(unittest.TestCase):
         self.assertTrue(Job.__table__.c.updated_at.type.timezone)
 
     def test_relationships_are_bidirectional(self) -> None:
-        self.assertEqual({"worker", "attempts", "recurring_job"}, set(Job.__mapper__.relationships.keys()))
+        self.assertEqual(
+            {"worker", "attempts", "recurring_job", "dead_letter"},
+            set(Job.__mapper__.relationships.keys()),
+        )
         self.assertEqual({"job", "worker"}, set(JobAttempt.__mapper__.relationships.keys()))
         self.assertEqual({"jobs", "attempts"}, set(Worker.__mapper__.relationships.keys()))
 

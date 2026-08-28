@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import AttemptStatus, Job, JobAttempt, JobStatus, WorkerStatus
+from app.database.repositories.dead_letter_repository import create_dead_letter
 from app.services.retry_policy import RetryPolicy
 from app.workers.registry import set_worker_status
 
@@ -26,6 +27,7 @@ class RetryOutcome:
     max_retries: int
     next_retry_at: datetime | None
     attempt_number: int
+    dead_letter_id: uuid.UUID | None = None
 
 
 def record_failure(
@@ -63,6 +65,16 @@ def record_failure(
         job.completed_at = now
         job.next_retry_at = None
         next_retry_at = None
+        dead_letter = create_dead_letter(
+            session,
+            job=job,
+            attempt=attempt,
+            error_type=type(error).__name__,
+            error_message=error_message,
+        )
+        dead_letter_id = dead_letter.id
+    if decision.should_retry:
+        dead_letter_id = None
     set_worker_status(session, worker_id, WorkerStatus.IDLE)
     return RetryOutcome(
         job_id=job.id,
@@ -73,6 +85,7 @@ def record_failure(
         max_retries=job.max_retries,
         next_retry_at=next_retry_at,
         attempt_number=attempt.attempt_number,
+        dead_letter_id=dead_letter_id,
     )
 
 

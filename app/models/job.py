@@ -16,6 +16,7 @@ from app.models.enums import JobStatus
 if TYPE_CHECKING:
     from app.models.job_attempt import JobAttempt
     from app.models.recurring_job import RecurringJob
+    from app.models.dead_letter import DeadLetterJob
     from app.models.worker import Worker
 
 
@@ -67,3 +68,4 @@ class Job(Base):
     worker: Mapped["Worker | None"] = relationship(back_populates="jobs")
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="job")
     recurring_job: Mapped["RecurringJob | None"] = relationship(back_populates="jobs")
+    dead_letter: Mapped["DeadLetterJob | None"] = relationship(back_populates="job", uselist=False)

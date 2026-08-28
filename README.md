@@ -121,3 +121,16 @@ POST /api/v1/recurring-jobs
 ```
 
 The recurring definition stores its next occurrence as UTC `next_run_at`. When due, the recurring scheduler locks the definition, creates one ordinary `PENDING` Job linked by `recurring_job_id`, records the occurrence in `last_run_at`, and advances `next_run_at` in the same transaction. It never executes task handlers. PostgreSQL locking prevents duplicate generation across scheduler processes, and overlap is allowed. Missed occurrences use the default `MISFIRE_POLICY=SKIP`: restart advances to the next future occurrence rather than generating a backlog. Use `GET /api/v1/recurring-jobs`, `GET /api/v1/recurring-jobs/<id>`, and the enable/disable endpoints to manage definitions. Disabling a definition does not delete generated execution history, and retries belong to each generated Job independently.
+
+## Dead-Letter Queue
+
+When a Job reaches terminal `FAILED` after retry exhaustion, TaskForge atomically preserves its final failed attempt and creates one `DeadLetterJob` record in PostgreSQL. The original Job remains `FAILED`; retryable failures remain `RETRYING` and do not enter the DLQ. Recurring schedules continue generating independent executions even when one execution is dead-lettered.
+
+```text
+GET    /api/v1/dead-letters?page=1&per_page=20&task_type=echo
+GET    /api/v1/dead-letters/<id>
+POST   /api/v1/dead-letters/<id>/retry
+DELETE /api/v1/dead-letters/<id>
+```
+
+Manual retry locks the DLQ record and Job, removes only the active DLQ record, returns the Job to `PENDING`, and preserves every historical `JobAttempt`. Workers then claim it normally. Deleting a DLQ record removes only the management record and never deletes the original Job or its attempts. DLQ records retain bounded error information, attempt count, final attempt ID, task type, source, and recurring-job linkage without automatic reprocessing.
