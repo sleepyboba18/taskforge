@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+from collections import defaultdict
+from threading import Lock
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -23,6 +25,7 @@ from app.models import (
     WorkerStatus,
     Workflow,
     WorkflowStatus,
+    RecurringJob,
 )
 
 WINDOWS = {
@@ -31,6 +34,28 @@ WINDOWS = {
     "7d": timedelta(days=7),
 }
 _PROCESS_STARTED = time.monotonic()
+_telemetry_lock = Lock()
+_request_telemetry = {"count": 0, "errors": 0, "slow": 0, "latency_ms": 0.0}
+
+
+def record_api_request(*, status_code: int, duration_ms: float, slow: bool) -> None:
+    """Record bounded local request telemetry; PostgreSQL remains authoritative for business metrics."""
+    with _telemetry_lock:
+        _request_telemetry["count"] += 1
+        _request_telemetry["errors"] += int(status_code >= 400)
+        _request_telemetry["slow"] += int(slow)
+        _request_telemetry["latency_ms"] += duration_ms
+
+
+def api_telemetry() -> dict[str, int | float]:
+    with _telemetry_lock:
+        count = _request_telemetry["count"]
+        return {
+            "request_count": count,
+            "error_count": _request_telemetry["errors"],
+            "average_latency_ms": round(_request_telemetry["latency_ms"] / count, 2) if count else 0,
+            "slow_requests": _request_telemetry["slow"],
+        }
 
 
 class MonitoringDatabaseError(RuntimeError):
@@ -75,12 +100,17 @@ def get_monitoring_snapshot(*, window: str, settings: Any) -> dict[str, Any]:
             previous_retry = session.scalar(select(func.count()).select_from(Job).where(Job.retry_count > 0, Job.updated_at >= previous_cutoff, Job.updated_at < cutoff)) or 0
             attempt_duration = func.extract("epoch", JobAttempt.finished_at - JobAttempt.started_at) * 1000
             latency = session.scalar(select(func.avg(attempt_duration)).where(JobAttempt.status == AttemptStatus.COMPLETED, JobAttempt.finished_at.is_not(None), JobAttempt.started_at >= cutoff)) or 0
+            queue_wait = session.scalar(select(func.avg(func.extract("epoch", JobAttempt.started_at - Job.created_at) * 1000)).join(Job, Job.id == JobAttempt.job_id).where(JobAttempt.started_at >= cutoff)) or 0
+            total_job_time = session.scalar(select(func.avg(func.extract("epoch", Job.completed_at - Job.created_at) * 1000)).where(Job.status == JobStatus.COMPLETED, Job.completed_at.is_not(None), Job.completed_at >= cutoff)) or 0
             oldest_pending = session.scalar(select(func.min(Job.created_at)).where(Job.status == JobStatus.PENDING))
             long_running = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.RUNNING, Job.started_at.is_not(None), Job.started_at < now - timedelta(seconds=settings.long_running_job_threshold_seconds))) or 0
+            stale_jobs = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.RUNNING, Job.started_at.is_not(None), Job.started_at < now - timedelta(seconds=settings.worker_stale_timeout))) or 0
             dlq_depth = session.scalar(select(func.count()).select_from(DeadLetterJob)) or 0
             dlq_window = session.scalar(select(func.count()).select_from(DeadLetterJob).where(DeadLetterJob.failed_at >= cutoff)) or 0
             audit_total = session.scalar(select(func.count()).select_from(AuditEvent)) or 0
             dependency_edges = session.scalar(select(func.count()).select_from(JobDependency)) or 0
+            recurring_count = session.scalar(select(func.count()).select_from(RecurringJob).where(RecurringJob.enabled.is_(True))) or 0
+            next_scheduled = session.scalar(select(func.min(Job.scheduled_at)).where(Job.status == JobStatus.SCHEDULED, Job.scheduled_at.is_not(None)))
             database_latency_ms = (time.perf_counter() - started) * 1000
             queue_depth = pending
             utilization = round(busy_workers / active_workers * 100, 2) if active_workers else 0
@@ -96,13 +126,14 @@ def get_monitoring_snapshot(*, window: str, settings: Any) -> dict[str, Any]:
                 "system": {"uptime_seconds": round(time.monotonic() - _PROCESS_STARTED, 2), "current_time": now.isoformat(), "environment": settings.app_env},
                 "queue": {"pending_jobs": pending, "running_jobs": status_counts.get(JobStatus.RUNNING, 0), "scheduled_jobs": scheduled, "retry_waiting_jobs": status_counts.get(JobStatus.RETRYING, 0), "completed_jobs": status_counts.get(JobStatus.COMPLETED, 0), "failed_jobs": status_counts.get(JobStatus.FAILED, 0), "cancelled_jobs": status_counts.get(JobStatus.CANCELLED, 0), "dependency_blocked_jobs": blocked, "queue_depth": queue_depth, "oldest_pending_job_age_seconds": max(0, int((now - oldest_pending).total_seconds())) if oldest_pending else 0},
                 "workers": {"total_workers": sum(worker_counts.values()), "active_workers": active_workers, "idle_workers": worker_counts.get(WorkerStatus.IDLE, 0), "busy_workers": busy_workers, "stale_workers": worker_counts.get(WorkerStatus.STALE, 0), "offline_workers": worker_counts.get(WorkerStatus.STOPPED, 0), "healthy_workers": active_workers - worker_counts.get(WorkerStatus.STALE, 0), "utilization_percent": utilization, "worker_capacity": active_workers, "available_capacity": max(0, active_workers - busy_workers)},
-                "jobs": {"jobs_completed_total": status_counts.get(JobStatus.COMPLETED, 0), "jobs_failed_total": status_counts.get(JobStatus.FAILED, 0), "jobs_cancelled_total": status_counts.get(JobStatus.CANCELLED, 0), "jobs_retried_total": retry_window, "completion_rate_per_hour": round(completed_window / max(WINDOWS[window].total_seconds() / 3600, 1 / 60), 2), "failure_rate": _rate(failed_window, completed_window + failed_window), "retry_rate": _rate(retry_window, max(completed_window + failed_window, 1)), "success_rate": _rate(completed_window, completed_window + failed_window), "average_execution_time_ms": round(float(latency), 2), "average_queue_wait_ms": 0, "average_total_job_time_ms": 0, "long_running_jobs": long_running},
+                "jobs": {"jobs_completed_total": status_counts.get(JobStatus.COMPLETED, 0), "jobs_failed_total": status_counts.get(JobStatus.FAILED, 0), "jobs_cancelled_total": status_counts.get(JobStatus.CANCELLED, 0), "jobs_retried_total": retry_window, "completion_rate_per_hour": round(completed_window / max(WINDOWS[window].total_seconds() / 3600, 1 / 60), 2), "failure_rate": _rate(failed_window, completed_window + failed_window), "retry_rate": _rate(retry_window, max(completed_window + failed_window, 1)), "success_rate": _rate(completed_window, completed_window + failed_window), "average_execution_time_ms": round(float(latency), 2), "average_queue_wait_ms": round(float(queue_wait), 2), "average_total_job_time_ms": round(float(total_job_time), 2), "long_running_jobs": long_running},
                 "workflows": {"active_workflows": workflow_counts.get(WorkflowStatus.PENDING, 0) + workflow_counts.get(WorkflowStatus.RUNNING, 0), "completed_workflows": workflow_counts.get(WorkflowStatus.SUCCEEDED, 0), "failed_workflows": workflow_counts.get(WorkflowStatus.FAILED, 0), "cancelled_workflows": workflow_counts.get(WorkflowStatus.CANCELLED, 0), "blocked_workflows": 0},
-                "scheduler": {"scheduler_running": True, "scheduled_jobs": scheduled, "recurring_jobs": 0, "next_scheduled_job": None, "missed_schedule_count": 0},
+                "scheduler": {"scheduler_running": "unknown", "scheduled_jobs": scheduled, "recurring_jobs": recurring_count, "next_scheduled_job": next_scheduled.isoformat() if next_scheduled else None, "missed_schedule_count": 0},
+                "jobs": {"jobs_completed_total": status_counts.get(JobStatus.COMPLETED, 0), "jobs_failed_total": status_counts.get(JobStatus.FAILED, 0), "jobs_cancelled_total": status_counts.get(JobStatus.CANCELLED, 0), "jobs_retried_total": retry_window, "completion_rate_per_hour": round(completed_window / max(WINDOWS[window].total_seconds() / 3600, 1 / 60), 2), "failure_rate": _rate(failed_window, completed_window + failed_window), "retry_rate": _rate(retry_window, max(completed_window + failed_window, 1)), "success_rate": _rate(completed_window, completed_window + failed_window), "average_execution_time_ms": round(float(latency), 2), "average_queue_wait_ms": round(float(queue_wait), 2), "average_total_job_time_ms": round(float(total_job_time), 2), "long_running_jobs": long_running, "stale_jobs": stale_jobs},
                 "dlq": {"dlq_depth": dlq_depth, "dlq_entries_in_window": dlq_window, "dlq_retries_in_window": 0, "dlq_discards_in_window": 0},
                 "dependencies": {"total_dependencies": dependency_edges, "blocked_jobs": blocked, "failed_dependency_chains": 0},
                 "database": {"database_status": "healthy", "database_latency_ms": round(database_latency_ms, 2), **_pool_metrics()},
-                "api": {"request_count": 0, "error_count": 0, "average_latency_ms": 0, "slow_requests": 0},
+                "api": api_telemetry(),
                 "audit": {"audit_events_total": audit_total},
                 "alerts": alerts,
             }

@@ -17,6 +17,7 @@ from app.api import api_bp
 from app.config.settings import ConfigurationError, Settings
 from app.database.session import initialize_database
 from app.sockets import socketio
+from app.services.monitoring_service import record_api_request
 
 logger = logging.getLogger("taskforge")
 
@@ -101,6 +102,11 @@ def create_app(settings: Settings | None = None) -> Flask:
                     "user_id": str(user.id) if user else None,
                     "role": user.role.value if user else None,
                 },
+            )
+            record_api_request(
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                slow=duration_ms >= settings.slow_request_threshold_ms,
             )
         return response
 

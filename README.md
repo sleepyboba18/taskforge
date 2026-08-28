@@ -214,6 +214,30 @@ The monitoring response derives non-persistent `INFO`, `WARNING`, and `CRITICAL`
 
 ## Monitoring Configuration
 
+## Observability
+
+TaskForge combines structured request logs with PostgreSQL-derived operational metrics. Request counters are bounded process-local supplemental telemetry; Jobs, Attempts, Workers, Workflows, DLQ records, Dependencies, and AuditEvents remain database-authoritative. No external monitoring stack is required.
+
+## Metrics
+
+Monitoring reports queue depth and backlog age, worker status and utilization, Job throughput/rates/latency, stale and long-running Jobs, workflow totals, dependency blocking, DLQ depth, scheduler schedule visibility, database latency/pool values, audit totals, and bounded API request/error/slow-request telemetry. Historical windows are explicitly limited to `1m`, `5m`, `15m`, `1h`, `6h`, `24h`, and `7d`.
+
+## Monitoring API
+
+Use the authenticated operator/admin endpoints under `/api/v1/monitoring`, including `/overview`, `/queue`, `/workers`, `/jobs`, `/workflows`, `/scheduler`, `/dlq`, `/database`, and `/alerts`. Monitoring is read-only and uses the existing request ID, RBAC, and PostgreSQL rate-limiting layers.
+
+## Structured Logging
+
+The existing logger records request ID, method, route, status, duration, actor context, and slow-request severity without request bodies. Worker and scheduler logs retain operational identifiers while excluding passwords, JWTs, authorization headers, database URLs, and complete Job payloads.
+
+## Operational Health
+
+`/health` remains lightweight liveness and `/ready` remains PostgreSQL readiness. Detailed monitoring can report degraded database state and deterministic queue, worker, DLQ, backlog, starvation, saturation, stale-worker, and failure/retry-spike conditions without modifying system state.
+
+## Telemetry Retention
+
+Monitoring does not create a row per observation or maintain a time-series database. Persistent audit history remains controlled by `AUDIT_RETENTION_DAYS=0` (unlimited) and is not automatically deleted. PostgreSQL operational records are queried with bounded windows and aggregate expressions.
+
 Configure thresholds in `.env` with `LONG_RUNNING_JOB_THRESHOLD_SECONDS`, `QUEUE_BACKLOG_WARNING_THRESHOLD`, `DLQ_BACKLOG_WARNING_THRESHOLD`, and `WORKER_SATURATION_THRESHOLD_PERCENT`. Monitoring failures return a controlled `MONITORING_UNAVAILABLE` response and never expose SQLAlchemy errors, connection strings, secrets, or Job payloads.
 
 ## Administrative Operations
