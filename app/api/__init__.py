@@ -23,6 +23,7 @@ from app.api.users import users_bp
 from app.api.observability import observability_bp
 from app.api.workflows import workflows_bp
 from app.api.audit import audit_bp, history_endpoint
+from app.api.monitoring import monitoring_bp
 
 api_bp.register_blueprint(jobs_bp)
 api_bp.register_blueprint(recurring_jobs_bp)
@@ -33,6 +34,7 @@ api_bp.register_blueprint(users_bp)
 api_bp.register_blueprint(observability_bp)
 api_bp.register_blueprint(workflows_bp)
 api_bp.register_blueprint(audit_bp)
+api_bp.register_blueprint(monitoring_bp)
 
 
 @api_bp.get("/api/v1/jobs/<job_id>/history")

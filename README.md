@@ -184,6 +184,38 @@ The global audit API supports pagination and filters for event/entity type, IDs,
 
 Audit events are inserted only by services as part of the same transaction as the state change. There are no update or delete endpoints. Global audit access is limited to operators and administrators and uses the existing JWT, RBAC, request ID, and rate-limiting layers.
 
+## Operational Monitoring
+
+TaskForge monitoring is derived primarily from bounded PostgreSQL aggregates over Jobs, Attempts, Workers, Workflows, DLQ records, Dependencies, and AuditEvents. It provides operational telemetry without an external metrics database or monitoring platform. Values are an operational snapshot and may be slightly eventually consistent across worker processes.
+
+## Monitoring APIs
+
+Authenticated operators and administrators can use the overview and focused endpoints:
+
+```text
+GET /api/v1/monitoring/overview
+GET /api/v1/monitoring/queue
+GET /api/v1/monitoring/workers
+GET /api/v1/monitoring/jobs
+GET /api/v1/monitoring/workflows
+GET /api/v1/monitoring/scheduler
+GET /api/v1/monitoring/dlq
+GET /api/v1/monitoring/database
+GET /api/v1/monitoring/alerts
+```
+
+## Metrics
+
+Monitoring accepts explicit windows: `1m`, `5m`, `15m`, `1h`, `6h`, `24h`, or `7d`; the default is `1h`. Metrics include queue depth and dependency blocking, worker utilization, Job throughput and rates, workflow totals, DLQ depth, database latency/pool values, audit totals, and bounded operational latency aggregates.
+
+## Alert Conditions
+
+The monitoring response derives non-persistent `INFO`, `WARNING`, and `CRITICAL` conditions such as high queue backlog, queue starvation, absent or stale workers, worker saturation, DLQ backlog, and failure/retry spikes. Alerts do not modify Jobs, workers, or scheduler state and do not send notifications.
+
+## Monitoring Configuration
+
+Configure thresholds in `.env` with `LONG_RUNNING_JOB_THRESHOLD_SECONDS`, `QUEUE_BACKLOG_WARNING_THRESHOLD`, `DLQ_BACKLOG_WARNING_THRESHOLD`, and `WORKER_SATURATION_THRESHOLD_PERCENT`. Monitoring failures return a controlled `MONITORING_UNAVAILABLE` response and never expose SQLAlchemy errors, connection strings, secrets, or Job payloads.
+
 ## Initialize the Schema
 
 After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:
