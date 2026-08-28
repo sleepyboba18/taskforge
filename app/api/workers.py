@@ -5,13 +5,12 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from app.api.serializers import worker_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED
 from app.rate_limit import rate_limit
-from app.config.settings import Settings
 from app.models import WorkerStatus
 from app.services.worker_service import WorkerDatabaseError, get_worker, list_workers, worker_health
 
@@ -41,7 +40,7 @@ def list_workers_endpoint():
 @rate_limit("read")
 def worker_health_endpoint():
     try:
-        summary = worker_health(stale_timeout=Settings.from_environment().worker_stale_timeout)
+        summary = worker_health(stale_timeout=current_app.config["TASKFORGE_SETTINGS"].worker_stale_timeout)
     except WorkerDatabaseError:
         return _error("DATABASE_ERROR", "Unable to read worker health.", 500)
     return jsonify({"success": True, "data": summary})

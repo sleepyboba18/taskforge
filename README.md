@@ -317,6 +317,16 @@ External API endpoints use the existing PostgreSQL-backed limiter where configur
 
 Administrative controls live under `/api/v1/admin`, require `OPERATOR` or `ADMIN`, validate bounded inputs, use transactional state changes, and write audit events. Configure `MAX_REQUEST_BODY_MB` (default `2`) to bound request bodies. In production, use a strong `SECRET_KEY` and explicit `CORS_ORIGINS`; wildcard origins are development-only.
 
+## Configuration
+
+`Settings.from_environment()` is the single configuration loader. Process environment values take precedence over `.env`, followed by safe non-secret development defaults. It validates PostgreSQL `DATABASE_URL`, `APP_ENV` (`development`, `testing`, or `production`), `PORT` (`1` through `65535`), strict booleans, worker/scheduler/retry/rate-limit/monitoring thresholds, request limits, and JWT expiration.
+
+Required deployment secrets are never logged or returned. Production requires explicit strong `SECRET_KEY` and `JWT_SECRET_KEY` values, `DEBUG=false`, and explicit `CORS_ORIGINS`; wildcard credentialed CORS is rejected. The sanitized startup log reports only environment, host, port, database configuration presence, worker count, and CORS configuration presence.
+
+## Environment Variables
+
+Use `.env.example` as the local template. Important settings include `DATABASE_URL`, `SECRET_KEY`, `JWT_SECRET_KEY`, `APP_ENV`, `HOST`, `PORT`, `WORKER_COUNT`, scheduler and retry intervals, `RATE_LIMIT_*`, `MAX_REQUEST_BODY_MB`, `SLOW_REQUEST_THRESHOLD_MS`, monitoring thresholds, `CORS_ORIGINS`, and `CORS_SUPPORTS_CREDENTIALS`. Do not place actual credentials in `.env.example` or commit `.env`.
+
 ## Concurrency Model
 
 PostgreSQL is TaskForge's authoritative coordination layer. Independent worker processes use row-level locks and `FOR UPDATE SKIP LOCKED`; Python globals, files, and local locks are never used for distributed state.

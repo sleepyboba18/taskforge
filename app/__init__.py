@@ -124,7 +124,14 @@ def create_app(settings: Settings | None = None) -> Flask:
         if request.path.startswith("/api/") and request.is_json and request.content_length:
             request.get_json(silent=False)
 
-    logger.info("Configured %s application in %s mode", settings.app_name, settings.app_env)
+    logger.info(
+        "Configured %s application in %s mode (host=%s port=%s database=configured workers=%s cors=configured)",
+        settings.app_name,
+        settings.app_env,
+        settings.host,
+        settings.port,
+        settings.worker_count,
+    )
     return app
 
 

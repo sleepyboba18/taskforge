@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -88,10 +89,10 @@ class Settings:
 
         settings = cls(
             app_name=os.getenv("APP_NAME", "TaskForge"),
-            app_env=os.getenv("APP_ENV", "development"),
+            app_env=os.getenv("APP_ENV", "development").strip().lower(),
             debug=_parse_bool("DEBUG", default=False),
             host=os.getenv("HOST", "127.0.0.1"),
-            port=_parse_positive_int("PORT", default=5000),
+            port=_parse_bounded_positive_int("PORT", default=5000, maximum=65535),
             database_url=database_url,
             secret_key=os.getenv("SECRET_KEY", "change-me"),
             worker_count=_parse_bounded_int("WORKER_COUNT", default=2, maximum=32),
@@ -144,10 +145,12 @@ class Settings:
             admin_bulk_action_limit=_parse_bounded_int("ADMIN_BULK_ACTION_LIMIT", default=100, maximum=1000),
             max_request_body_mb=_parse_bounded_int("MAX_REQUEST_BODY_MB", default=2, maximum=50),
             cors_origins=cors_origins,
-            cors_supports_credentials=cors_origins != "*" and _parse_bool(
-                "CORS_SUPPORTS_CREDENTIALS", default=False
-            ),
+            cors_supports_credentials=_parse_bool("CORS_SUPPORTS_CREDENTIALS", default=False),
         )
+        if settings.app_env not in {"development", "testing", "production"}:
+            raise ConfigurationError("APP_ENV must be development, testing, or production.")
+        if urlparse(settings.database_url).scheme not in {"postgresql", "postgresql+psycopg"}:
+            raise ConfigurationError("DATABASE_URL must use PostgreSQL (postgresql+psycopg://...).")
         if settings.retry_max_delay < settings.retry_base_delay:
             raise ConfigurationError("RETRY_MAX_DELAY must be greater than or equal to RETRY_BASE_DELAY.")
         if settings.misfire_policy != "SKIP":
@@ -173,6 +176,10 @@ class Settings:
             raise ConfigurationError("SECRET_KEY must be explicitly configured and at least 32 characters in production.")
         if settings.app_env.lower() == "production" and settings.cors_origins == "*":
             raise ConfigurationError("CORS_ORIGINS must be explicit in production.")
+        if settings.cors_origins == "*" and settings.cors_supports_credentials:
+            raise ConfigurationError("CORS_SUPPORTS_CREDENTIALS cannot be enabled with wildcard CORS_ORIGINS.")
+        if settings.app_env == "production" and settings.debug:
+            raise ConfigurationError("DEBUG must be false in production.")
         return settings
 
     def as_flask_config(self) -> dict[str, object]:
@@ -207,6 +214,13 @@ def _parse_positive_int(name: str, default: int) -> int:
         raise ConfigurationError(f"{name} must be a positive integer.") from exc
     if parsed <= 0:
         raise ConfigurationError(f"{name} must be a positive integer.")
+    return parsed
+
+
+def _parse_bounded_positive_int(name: str, default: int, maximum: int) -> int:
+    parsed = _parse_positive_int(name, default)
+    if parsed > maximum:
+        raise ConfigurationError(f"{name} must be no greater than {maximum}.")
     return parsed
 
 
