@@ -41,6 +41,9 @@ class Settings:
     bootstrap_admin_username: str | None
     bootstrap_admin_email: str | None
     bootstrap_admin_password: str | None
+    log_level: str
+    slow_request_threshold_ms: int
+    metrics_default_window: str
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -91,6 +94,11 @@ class Settings:
             bootstrap_admin_username=_optional_env("BOOTSTRAP_ADMIN_USERNAME"),
             bootstrap_admin_email=_optional_env("BOOTSTRAP_ADMIN_EMAIL"),
             bootstrap_admin_password=_optional_env("BOOTSTRAP_ADMIN_PASSWORD"),
+            log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
+            slow_request_threshold_ms=_parse_bounded_int(
+                "SLOW_REQUEST_THRESHOLD_MS", default=1000, maximum=600000
+            ),
+            metrics_default_window=os.getenv("METRICS_DEFAULT_WINDOW", "24h").strip().lower(),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False
@@ -113,6 +121,10 @@ class Settings:
             raise ConfigurationError("Bootstrap admin username, email, and password must be provided together.")
         if settings.bootstrap_admin_password and len(settings.bootstrap_admin_password) < 8:
             raise ConfigurationError("BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters.")
+        if settings.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ConfigurationError("LOG_LEVEL must be a standard logging level.")
+        if settings.metrics_default_window not in {"1h", "24h", "7d"}:
+            raise ConfigurationError("METRICS_DEFAULT_WINDOW must be 1h, 24h, or 7d.")
         return settings
 
     def as_flask_config(self) -> dict[str, object]:

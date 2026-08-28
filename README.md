@@ -50,6 +50,14 @@ Use `GET /api/v1/auth/me` to inspect the current account and `POST /api/v1/auth/
 
 Configure `JWT_SECRET_KEY` and `JWT_ACCESS_TOKEN_EXPIRES_MINUTES` in `.env`; no JWT secret is embedded in source. An optional first administrator can be bootstrapped with `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_EMAIL`, and `BOOTSTRAP_ADMIN_PASSWORD`. These values must be supplied together, and no default account is created. Internal workers, schedulers, heartbeats, and recovery continue to use their database services directly and do not require JWTs.
 
+## Observability
+
+`GET /health` is public liveness and reports whether the Flask process is responding. `GET /ready` is public readiness and performs a lightweight PostgreSQL connectivity check, returning `503` when the database is unavailable. Neither endpoint exposes infrastructure details.
+
+Authenticated users can query `GET /api/v1/health` for database, worker, scheduler, and queue state, and `GET /api/v1/metrics` for PostgreSQL-derived queue counts, throughput, execution latency, success/failure rates, DLQ counts, and worker counts. Metrics supports the strict windows `1h`, `24h`, and `7d`. Viewers, operators, and administrators may read these endpoints.
+
+Every HTTP response includes an `X-Request-ID`. A valid client-supplied request ID is reused; otherwise TaskForge generates a UUID. Request timing and slow requests are logged without request bodies, passwords, JWTs, authorization headers, database URLs, or other secrets. Configure `LOG_LEVEL`, `SLOW_REQUEST_THRESHOLD_MS`, and `METRICS_DEFAULT_WINDOW` in `.env`.
+
 ## Initialize the Schema
 
 After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:

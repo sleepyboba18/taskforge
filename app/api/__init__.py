@@ -17,6 +17,7 @@ from app.api.dead_letters import dead_letters_bp
 from app.api.workers import workers_bp
 from app.api.auth import auth_bp
 from app.api.users import users_bp
+from app.api.observability import observability_bp
 
 api_bp.register_blueprint(jobs_bp)
 api_bp.register_blueprint(recurring_jobs_bp)
@@ -24,6 +25,7 @@ api_bp.register_blueprint(dead_letters_bp)
 api_bp.register_blueprint(workers_bp)
 api_bp.register_blueprint(auth_bp)
 api_bp.register_blueprint(users_bp)
+api_bp.register_blueprint(observability_bp)
 
 
-__all__ = ["api_bp", "auth_bp", "dead_letters_bp", "jobs_bp", "recurring_jobs_bp", "users_bp", "workers_bp"]
+__all__ = ["api_bp", "auth_bp", "dead_letters_bp", "jobs_bp", "observability_bp", "recurring_jobs_bp", "users_bp", "workers_bp"]
