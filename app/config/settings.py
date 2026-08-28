@@ -36,6 +36,11 @@ class Settings:
     worker_heartbeat_interval: float
     worker_stale_timeout: float
     recovery_poll_interval: float
+    jwt_secret_key: str
+    jwt_access_token_expires_minutes: int
+    bootstrap_admin_username: str | None
+    bootstrap_admin_email: str | None
+    bootstrap_admin_password: str | None
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -79,6 +84,13 @@ class Settings:
             worker_heartbeat_interval=_parse_positive_float("WORKER_HEARTBEAT_INTERVAL", default=5.0),
             worker_stale_timeout=_parse_positive_float("WORKER_STALE_TIMEOUT", default=30.0),
             recovery_poll_interval=_parse_positive_float("RECOVERY_POLL_INTERVAL", default=10.0),
+            jwt_secret_key=os.getenv("JWT_SECRET_KEY", "").strip(),
+            jwt_access_token_expires_minutes=_parse_bounded_int(
+                "JWT_ACCESS_TOKEN_EXPIRES_MINUTES", default=60, maximum=1440
+            ),
+            bootstrap_admin_username=_optional_env("BOOTSTRAP_ADMIN_USERNAME"),
+            bootstrap_admin_email=_optional_env("BOOTSTRAP_ADMIN_EMAIL"),
+            bootstrap_admin_password=_optional_env("BOOTSTRAP_ADMIN_PASSWORD"),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False
@@ -90,6 +102,17 @@ class Settings:
             raise ConfigurationError("MISFIRE_POLICY currently supports only SKIP.")
         if settings.worker_stale_timeout <= settings.worker_heartbeat_interval:
             raise ConfigurationError("WORKER_STALE_TIMEOUT must be greater than WORKER_HEARTBEAT_INTERVAL.")
+        if not settings.jwt_secret_key:
+            raise ConfigurationError("JWT_SECRET_KEY is required and must not be empty.")
+        bootstrap_values = (
+            settings.bootstrap_admin_username,
+            settings.bootstrap_admin_email,
+            settings.bootstrap_admin_password,
+        )
+        if any(bootstrap_values) and not all(bootstrap_values):
+            raise ConfigurationError("Bootstrap admin username, email, and password must be provided together.")
+        if settings.bootstrap_admin_password and len(settings.bootstrap_admin_password) < 8:
+            raise ConfigurationError("BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters.")
         return settings
 
     def as_flask_config(self) -> dict[str, object]:
@@ -158,3 +181,8 @@ def _parse_non_negative_float(name: str, default: float) -> float:
     if parsed < 0:
         raise ConfigurationError(f"{name} must be a non-negative number.")
     return parsed
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name, "").strip()
+    return value or None

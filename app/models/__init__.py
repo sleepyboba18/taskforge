@@ -6,6 +6,7 @@ from app.models.job_attempt import JobAttempt
 from app.models.recurring_job import RecurringJob
 from app.models.dead_letter import DeadLetterJob
 from app.models.worker import Worker
+from app.models.user import User, UserRole
 
 __all__ = [
 	"AttemptStatus",
@@ -16,4 +17,6 @@ __all__ = [
 	"RecurringJob",
 	"Worker",
 	"WorkerStatus",
+	"User",
+	"UserRole",
 ]

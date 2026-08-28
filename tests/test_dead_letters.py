@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from app import create_app
-from app.models import DeadLetterJob, Job, JobStatus
+from app.models import DeadLetterJob, Job, JobStatus, User, UserRole
 from app.database.repositories.retry_repository import RetryOutcome
 
 
@@ -17,6 +17,14 @@ class DeadLetterRouteTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = create_app()
         cls.client = cls.app.test_client()
+        cls.user = User(id=uuid.uuid4(), username="operator", email="operator@example.com", password_hash="hash", role=UserRole.OPERATOR, is_active=True)
+
+    def setUp(self):
+        self.auth_patch = patch("app.auth.decorators.authenticate_request", return_value=(self.user, None))
+        self.auth_patch.start()
+
+    def tearDown(self):
+        self.auth_patch.stop()
 
     def test_list_has_bounded_pagination(self) -> None:
         response = self.client.get("/api/v1/dead-letters?per_page=101")

@@ -57,6 +57,14 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     app.register_blueprint(api_bp)
     _register_error_handlers(app)
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
+
     logger.info("Configured %s application in %s mode", settings.app_name, settings.app_env)
     return app
 

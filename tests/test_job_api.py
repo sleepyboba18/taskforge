@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from app import create_app
 from app.api.jobs import _validate_job_input
-from app.models import Job, JobStatus
+from app.models import Job, JobStatus, User, UserRole
 from app.services.job_service import JobStateConflictError
 
 
@@ -46,6 +46,14 @@ class JobRouteTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = create_app()
         cls.client = cls.app.test_client()
+        cls.user = User(id=uuid.uuid4(), username="operator", email="operator@example.com", password_hash="hash", role=UserRole.OPERATOR, is_active=True)
+
+    def setUp(self):
+        self.auth_patch = patch("app.auth.decorators.authenticate_request", return_value=(self.user, None))
+        self.auth_patch.start()
+
+    def tearDown(self):
+        self.auth_patch.stop()
 
     def test_creation_returns_safe_success_shape(self) -> None:
         job = Job(

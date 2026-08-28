@@ -8,6 +8,8 @@ from app import create_app, socketio
 from app.config.settings import ConfigurationError, Settings
 from app.workers import WorkerManager
 from app.workers.signals import install_shutdown_handlers
+from app.database.session import initialize_schema
+from app.services.user_service import bootstrap_admin, UserServiceError
 
 logger = logging.getLogger("taskforge")
 
@@ -20,6 +22,18 @@ def main() -> None:
         logging.basicConfig(level=logging.ERROR)
         logger.error("Configuration error: %s", exc)
         raise SystemExit(1) from exc
+
+    if settings.bootstrap_admin_username:
+        try:
+            initialize_schema()
+            bootstrap_admin(
+                username=settings.bootstrap_admin_username,
+                email=settings.bootstrap_admin_email,
+                password=settings.bootstrap_admin_password,
+            )
+        except UserServiceError as exc:
+            logger.error("Bootstrap administrator setup failed: %s", type(exc).__name__)
+            raise SystemExit(1) from exc
 
     worker_manager = WorkerManager(settings)
     install_shutdown_handlers(worker_manager.stop)

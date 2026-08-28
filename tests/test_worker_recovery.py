@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from app import create_app
 from app.config.settings import ConfigurationError, Settings
-from app.models import Worker, WorkerStatus
+from app.models import User, UserRole, Worker, WorkerStatus
 from app.services.worker_service import worker_health
 from app.workers.worker import _job_event
 
@@ -20,6 +20,14 @@ class WorkerHealthApiTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = create_app()
         cls.client = cls.app.test_client()
+        cls.user = User(id=uuid.uuid4(), username="viewer", email="viewer@example.com", password_hash="hash", role=UserRole.VIEWER, is_active=True)
+
+    def setUp(self):
+        self.auth_patch = patch("app.auth.decorators.authenticate_request", return_value=(self.user, None))
+        self.auth_patch.start()
+
+    def tearDown(self):
+        self.auth_patch.stop()
 
     def test_malformed_worker_id_is_rejected(self) -> None:
         response = self.client.get("/api/v1/workers/not-a-uuid")

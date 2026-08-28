@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from app import create_app
-from app.models import Job, JobStatus
+from app.models import Job, JobStatus, User, UserRole
 from app.workers.scheduled_scheduler import run_scheduled_scheduler
 
 
@@ -17,6 +17,14 @@ class OneTimeSchedulingTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = create_app()
         cls.client = cls.app.test_client()
+        cls.user = User(id=uuid.uuid4(), username="operator", email="operator@example.com", password_hash="hash", role=UserRole.OPERATOR, is_active=True)
+
+    def setUp(self):
+        self.auth_patch = patch("app.auth.decorators.authenticate_request", return_value=(self.user, None))
+        self.auth_patch.start()
+
+    def tearDown(self):
+        self.auth_patch.stop()
 
     def test_future_submission_remains_scheduled_and_emits_scheduling_event(self) -> None:
         scheduled_at = datetime(2026, 9, 1, 5, 0, tzinfo=timezone.utc)

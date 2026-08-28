@@ -37,6 +37,19 @@ python main.py
 
 The service listens on the configured host and port. `GET /health` returns the service status. Database connectivity can be checked through the reusable `check_database_connection` function; this foundation does not create tables automatically.
 
+## Authentication and Authorization
+
+User accounts are stored in PostgreSQL with unique usernames and emails. Passwords are stored only as Werkzeug password hashes. Login returns a short-lived JWT access token:
+
+```text
+POST /api/v1/auth/login
+Authorization: Bearer <access_token>
+```
+
+Use `GET /api/v1/auth/me` to inspect the current account and `POST /api/v1/auth/change-password` to change its password. `ADMIN`, `OPERATOR`, and `VIEWER` roles are enforced from the current database user on every protected request. Viewers can inspect jobs, DLQ records, workers, and recurring schedules. Operators can submit/cancel jobs, retry or delete DLQ records, and modify recurring schedules. Administrators additionally manage users through `GET/POST /api/v1/users`, `GET /api/v1/users/<id>`, and `PATCH /api/v1/users/<id>`.
+
+Configure `JWT_SECRET_KEY` and `JWT_ACCESS_TOKEN_EXPIRES_MINUTES` in `.env`; no JWT secret is embedded in source. An optional first administrator can be bootstrapped with `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_EMAIL`, and `BOOTSTRAP_ADMIN_PASSWORD`. These values must be supplied together, and no default account is created. Internal workers, schedulers, heartbeats, and recovery continue to use their database services directly and do not require JWTs.
+
 ## Initialize the Schema
 
 After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:

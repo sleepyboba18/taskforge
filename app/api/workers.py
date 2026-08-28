@@ -8,6 +8,8 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from app.api.serializers import worker_to_dict
+from app.auth.decorators import require_roles
+from app.auth.permissions import AUTHENTICATED
 from app.config.settings import Settings
 from app.models import WorkerStatus
 from app.services.worker_service import WorkerDatabaseError, get_worker, list_workers, worker_health
@@ -16,6 +18,7 @@ workers_bp = Blueprint("workers", __name__, url_prefix="/api/v1/workers")
 
 
 @workers_bp.get("")
+@require_roles(*AUTHENTICATED)
 def list_workers_endpoint():
     value = request.args.get("status")
     status = None
@@ -32,6 +35,7 @@ def list_workers_endpoint():
 
 
 @workers_bp.get("/health")
+@require_roles(*AUTHENTICATED)
 def worker_health_endpoint():
     try:
         summary = worker_health(stale_timeout=Settings.from_environment().worker_stale_timeout)
@@ -41,6 +45,7 @@ def worker_health_endpoint():
 
 
 @workers_bp.get("/<worker_id>")
+@require_roles(*AUTHENTICATED)
 def get_worker_endpoint(worker_id: str):
     try:
         parsed_id = uuid.UUID(worker_id)
