@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, g, has_app_context, jsonify, request
 
 from app.api.serializers import job_to_dict
 from app.auth.decorators import require_roles
@@ -22,6 +22,18 @@ from app.services.job_service import (
     create_job,
     get_job_by_id,
     list_jobs,
+)
+from app.services.dependency_service import (
+    DependencyCycleError,
+    DependencyDatabaseError,
+    DependencyImmutableError,
+    DependencyNotFoundError,
+    DependencyValidationError,
+    dependency_state,
+    get_dependencies,
+    get_dependents,
+    mutate_dependency,
+    validate_dependency_ids,
 )
 
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/api/v1/jobs")
@@ -43,7 +55,16 @@ def submit_job():
         return _error("VALIDATION_ERROR", "Invalid request data.", details=errors, status=400)
 
     try:
-        job = create_job(**values)
+        job = create_job(
+            **values,
+            max_dependency_graph_nodes=current_app.config["TASKFORGE_SETTINGS"].max_dependency_graph_nodes,
+        )
+    except DependencyNotFoundError as exc:
+        return _error("DEPENDENCY_NOT_FOUND", f"Dependency job {exc} was not found.", status=404)
+    except DependencyCycleError:
+        return _error("DEPENDENCY_CYCLE", "Adding these dependencies would create a cycle.", status=409)
+    except DependencyValidationError as exc:
+        return _error("INVALID_DEPENDENCIES", str(exc), status=400)
     except JobDatabaseError:
         return _error("DATABASE_ERROR", "Unable to persist job.", status=500)
     return jsonify({"success": True, "data": job_to_dict(job)}), 201
@@ -103,7 +124,10 @@ def cancel_job_endpoint(job_id: str):
     if error:
         return error
     try:
-        job = cancel_job(parsed_id)
+        job = cancel_job(
+            parsed_id,
+            max_dependency_propagation_depth=current_app.config["TASKFORGE_SETTINGS"].max_dependency_propagation_depth,
+        )
     except JobNotFoundError:
         return _error("JOB_NOT_FOUND", "Job not found.", status=404)
     except JobStateConflictError as exc:
@@ -112,6 +136,83 @@ def cancel_job_endpoint(job_id: str):
     except JobDatabaseError:
         return _error("DATABASE_ERROR", "Unable to cancel job.", status=500)
     return jsonify({"success": True, "message": "Job cancelled successfully.", "data": job_to_dict(job)})
+
+
+@jobs_bp.get("/<job_id>/dependencies")
+@require_roles(*AUTHENTICATED)
+@rate_limit("read")
+def dependencies_endpoint(job_id: str):
+    parsed_id, error = _parse_uuid(job_id)
+    if error:
+        return error
+    try:
+        rows = get_dependencies(parsed_id)
+    except DependencyNotFoundError:
+        return _error("JOB_NOT_FOUND", "Job not found.", status=404)
+    except DependencyDatabaseError:
+        return _error("DATABASE_ERROR", "Unable to retrieve dependencies.", status=500)
+    return jsonify({"success": True, "data": {"job_id": str(parsed_id), "dependencies": [
+        {"job_id": str(dependency.id), "status": dependency.status.value,
+         "satisfied": dependency.status == JobStatus.COMPLETED}
+        for _, dependency in rows
+    ]}})
+
+
+@jobs_bp.get("/<job_id>/dependents")
+@require_roles(*AUTHENTICATED)
+@rate_limit("read")
+def dependents_endpoint(job_id: str):
+    parsed_id, error = _parse_uuid(job_id)
+    if error:
+        return error
+    try:
+        jobs = get_dependents(parsed_id)
+    except DependencyNotFoundError:
+        return _error("JOB_NOT_FOUND", "Job not found.", status=404)
+    except DependencyDatabaseError:
+        return _error("DATABASE_ERROR", "Unable to retrieve dependents.", status=500)
+    return jsonify({"success": True, "data": {"job_id": str(parsed_id), "dependents": [job_to_dict(job) for job in jobs]}})
+
+
+@jobs_bp.post("/<job_id>/dependencies")
+@require_roles(*OPERATORS)
+@rate_limit("write")
+def add_dependency_endpoint(job_id: str):
+    return _mutate_dependency(job_id, add=True)
+
+
+@jobs_bp.delete("/<job_id>/dependencies/<dependency_job_id>")
+@require_roles(*OPERATORS)
+@rate_limit("write")
+def remove_dependency_endpoint(job_id: str, dependency_job_id: str):
+    return _mutate_dependency(job_id, dependency_job_id, add=False)
+
+
+def _mutate_dependency(job_id: str, dependency_job_id: str | None = None, *, add: bool):
+    parsed_job, error = _parse_uuid(job_id)
+    if error:
+        return error
+    body = request.get_json(silent=True) if add else {}
+    dependency_value = body.get("depends_on_job_id") if isinstance(body, dict) else dependency_job_id
+    parsed_dependency, error = _parse_uuid(dependency_value or "")
+    if error:
+        return _error("INVALID_DEPENDENCIES", "Dependency ID must be a valid UUID.", status=400)
+    settings = current_app.config["TASKFORGE_SETTINGS"]
+    try:
+        mutate_dependency(parsed_job, parsed_dependency, add=add, max_nodes=settings.max_dependency_graph_nodes)
+    except DependencyNotFoundError:
+        return _error("DEPENDENCY_NOT_FOUND", "Job or dependency was not found.", status=404)
+    except DependencyImmutableError:
+        return _error("DEPENDENCY_IMMUTABLE", "Dependencies can only be changed while a job is pending.", status=409)
+    except DependencyCycleError:
+        return _error("DEPENDENCY_CYCLE", "Adding this dependency would create a cycle.", status=409)
+    except DependencyValidationError as exc:
+        return _error("INVALID_DEPENDENCIES", str(exc), status=400)
+    except DependencyDatabaseError:
+        return _error("DATABASE_ERROR", "Unable to update dependencies.", status=500)
+    logger = current_app.logger
+    logger.info("dependency_%s", "created" if add else "removed", extra={"job_id": str(parsed_job), "depends_on_job_id": str(parsed_dependency), "request_id": getattr(g, "request_id", None)})
+    return jsonify({"success": True, "message": "Dependency updated successfully."})
 
 
 def _validate_job_input(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -138,6 +239,13 @@ def _validate_job_input(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str,
     scheduled_at, scheduled_error = _parse_scheduled_at(body.get("scheduled_at"))
     if scheduled_error:
         errors["scheduled_at"] = scheduled_error
+    try:
+        dependency_ids = validate_dependency_ids(
+            body.get("dependencies"),
+            maximum=(current_app.config["TASKFORGE_SETTINGS"].max_job_dependencies if has_app_context() else 100),
+        )
+    except DependencyValidationError as exc:
+        errors["dependencies"] = str(exc)
     if errors:
         return {}, errors
     return {
@@ -147,6 +255,7 @@ def _validate_job_input(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str,
         "priority": priority,
         "max_retries": max_retries,
         "scheduled_at": scheduled_at,
+        "dependency_ids": dependency_ids,
     }, {}
 
 

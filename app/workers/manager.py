@@ -43,6 +43,7 @@ class WorkerManager:
                     "retry_base_delay": self.settings.retry_base_delay,
                     "retry_max_delay": self.settings.retry_max_delay,
                     "heartbeat_interval": self.settings.worker_heartbeat_interval,
+                    "max_dependency_propagation_depth": self.settings.max_dependency_propagation_depth,
                     "shutdown_event": self._shutdown_event,
                 },
                 name=f"taskforge-worker-{index}",

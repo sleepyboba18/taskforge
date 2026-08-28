@@ -33,6 +33,7 @@ def run_worker(
     retry_max_delay: float,
     heartbeat_interval: float,
     shutdown_event,
+    max_dependency_propagation_depth: int = 50,
 ) -> None:
     """Run one worker process using resources initialized inside that process."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -77,7 +78,7 @@ def run_worker(
             try:
                 registry.execute(claimed.task_type, claimed.payload)
             except Exception as exc:
-                _fail_job(claimed, exc, retry_policy)
+                _fail_job(claimed, exc, retry_policy, max_dependency_propagation_depth)
             else:
                 _complete_job(claimed)
     except Exception:
@@ -174,7 +175,7 @@ def _complete_job(claimed: ClaimedJob) -> None:
     logger.info("Job execution completed: %s", claimed.job_id)
 
 
-def _fail_job(claimed: ClaimedJob, error: Exception, policy: RetryPolicy) -> None:
+def _fail_job(claimed: ClaimedJob, error: Exception, policy: RetryPolicy, max_dependency_propagation_depth: int = 50) -> None:
     logger.exception("Job execution failed: %s", claimed.job_id)
     try:
         outcome = handle_task_failure(
@@ -183,6 +184,7 @@ def _fail_job(claimed: ClaimedJob, error: Exception, policy: RetryPolicy) -> Non
             worker_id=claimed.worker_id,
             error=error,
             policy=policy,
+            max_dependency_propagation_depth=max_dependency_propagation_depth,
         )
     except (RetryDatabaseError, RuntimeError):
         logger.exception("Database error failing job %s", claimed.job_id)

@@ -54,6 +54,10 @@ class Settings:
     rate_limit_viewer: int
     rate_limit_retention_seconds: int
     rate_limit_fail_open: bool
+    max_job_dependencies: int
+    max_dependency_graph_depth: int
+    max_dependency_graph_nodes: int
+    max_dependency_propagation_depth: int
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -119,6 +123,10 @@ class Settings:
             rate_limit_viewer=_parse_bounded_int("RATE_LIMIT_VIEWER", default=60, maximum=100000),
             rate_limit_retention_seconds=_parse_bounded_int("RATE_LIMIT_RETENTION_SECONDS", default=3600, maximum=604800),
             rate_limit_fail_open=_parse_bool("RATE_LIMIT_FAIL_OPEN", default=False),
+            max_job_dependencies=_parse_bounded_int("MAX_JOB_DEPENDENCIES", default=100, maximum=10000),
+            max_dependency_graph_depth=_parse_bounded_int("MAX_DEPENDENCY_GRAPH_DEPTH", default=50, maximum=1000),
+            max_dependency_graph_nodes=_parse_bounded_int("MAX_DEPENDENCY_GRAPH_NODES", default=1000, maximum=100000),
+            max_dependency_propagation_depth=_parse_bounded_int("MAX_DEPENDENCY_PROPAGATION_DEPTH", default=50, maximum=1000),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False

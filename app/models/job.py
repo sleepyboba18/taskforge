@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from app.models.job_attempt import JobAttempt
     from app.models.recurring_job import RecurringJob
     from app.models.dead_letter import DeadLetterJob
+    from app.models.job_dependency import JobDependency
     from app.models.worker import Worker
 
 
@@ -71,3 +72,9 @@ class Job(Base):
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="job")
     recurring_job: Mapped["RecurringJob | None"] = relationship(back_populates="jobs")
     dead_letter: Mapped["DeadLetterJob | None"] = relationship(back_populates="job", uselist=False)
+    dependencies: Mapped[list["JobDependency"]] = relationship(
+        foreign_keys="JobDependency.job_id", back_populates="job", cascade="all, delete-orphan"
+    )
+    dependents: Mapped[list["JobDependency"]] = relationship(
+        foreign_keys="JobDependency.depends_on_job_id", back_populates="depends_on", cascade="all, delete-orphan"
+    )

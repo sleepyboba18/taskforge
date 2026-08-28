@@ -93,6 +93,33 @@ Allowed responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-R
 
 Authenticated route buckets use the role loaded from PostgreSQL, never a request body field. `ADMIN`, `OPERATOR`, and `VIEWER` limits are configurable independently. Route categories distinguish `AUTH`, `READ`, `WRITE`, and `ADMIN`; authorization remains separate, so an authorized request receives `403 Forbidden` when permissions are insufficient and `429` only after exceeding its configured limit.
 
+## Task Dependencies
+
+Jobs may depend on other Jobs. An edge `A -> B` means B runs only after A succeeds. Jobs without dependencies retain the existing queue behavior. A job with dependencies waits until every direct dependency is `COMPLETED`; scheduled jobs must satisfy both their schedule and dependency conditions.
+
+## Dependency Graphs
+
+Use `GET /api/v1/jobs/<job_id>/dependencies` to inspect direct prerequisites and `GET /api/v1/jobs/<job_id>/dependents` to inspect direct downstream Jobs. Dependency edges are stored in PostgreSQL with indexed foreign keys and duplicate-edge protection. Graph traversal is bounded by `MAX_DEPENDENCY_GRAPH_DEPTH` and `MAX_DEPENDENCY_GRAPH_NODES` for future bounded graph operations.
+
+## Dependency Rules
+
+Dependencies can be supplied as a UUID array during Job creation or added and removed through the dependency endpoints while the Job is still `PENDING`. Self-dependencies, missing Jobs, duplicate input, and cycles are rejected. A terminally failed or cancelled dependency blocks downstream pending work and records a safe reason; retryable failures do not block dependents.
+
+## Dependency APIs
+
+```text
+GET    /api/v1/jobs/<job_id>/dependencies
+GET    /api/v1/jobs/<job_id>/dependents
+POST   /api/v1/jobs/<job_id>/dependencies
+DELETE /api/v1/jobs/<job_id>/dependencies/<dependency_job_id>
+```
+
+The creation request remains backwards compatible and accepts `"dependencies": []`. Dependency inspection uses authenticated read access; dependency mutation uses existing operator permissions and rate limits. Responses report each prerequisite Job status and whether it is satisfied.
+
+## Workflow Execution
+
+Workers continue using PostgreSQL row locks and now claim only pending Jobs whose direct dependencies have all completed successfully. Fan-out and fan-in workflows are supported without process-local graph state. Terminal dependency failure or cancellation propagates through pending downstream chains as `CANCELLED`; successful completion makes downstream Jobs naturally eligible on the next queue poll. Dependency counts for waiting Jobs, blocked Jobs, and edges are included in PostgreSQL-derived metrics.
+
 ## Initialize the Schema
 
 After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:

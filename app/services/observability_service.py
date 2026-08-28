@@ -6,11 +6,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import aliased
 
 from app.database.session import check_database_connection, session_scope
-from app.models import AttemptStatus, DeadLetterJob, Job, JobAttempt, JobStatus, Worker, WorkerStatus
+from app.models import AttemptStatus, DeadLetterJob, Job, JobAttempt, JobDependency, JobStatus, Worker, WorkerStatus
 
 logger = logging.getLogger("taskforge.observability")
 
@@ -79,6 +80,25 @@ def collect_metrics(*, window: str) -> dict[str, Any]:
                 select(func.count()).select_from(Worker).where(Worker.status == WorkerStatus.STALE)
             ) or 0
             total_workers = session.scalar(select(func.count()).select_from(Worker)) or 0
+            dependency_edges = session.scalar(select(func.count()).select_from(JobDependency)) or 0
+            dependency_parent = aliased(Job)
+            dependency_waiting = session.scalar(
+                select(func.count()).select_from(Job).where(
+                    Job.status.in_([JobStatus.PENDING, JobStatus.SCHEDULED, JobStatus.RETRYING]),
+                    exists(select(JobDependency.id).where(JobDependency.job_id == Job.id)),
+                    exists(
+                        select(JobDependency.id).join(dependency_parent, dependency_parent.id == JobDependency.depends_on_job_id).where(
+                            JobDependency.job_id == Job.id, dependency_parent.status != JobStatus.COMPLETED
+                        )
+                    ),
+                )
+            ) or 0
+            dependency_blocked = session.scalar(
+                select(func.count()).select_from(Job).where(
+                    Job.status == JobStatus.CANCELLED,
+                    Job.last_error.like("Dependency job %"),
+                )
+            ) or 0
             return {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "window": window,
@@ -113,6 +133,11 @@ def collect_metrics(*, window: str) -> dict[str, Any]:
                     "healthy": healthy_workers,
                     "stale": stale_workers,
                     "active": status_counts.get(JobStatus.RUNNING, 0),
+                },
+                "dependencies": {
+                    "waiting_jobs": dependency_waiting,
+                    "blocked_jobs": dependency_blocked,
+                    "dependency_edges": dependency_edges,
                 },
             }
     except (SQLAlchemyError, KeyError) as exc:

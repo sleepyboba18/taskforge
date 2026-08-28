@@ -17,6 +17,7 @@ from app.database.repositories.job_repository import (
 )
 from app.database.session import session_scope
 from app.models import Job, JobStatus
+from app.services.dependency_service import add_edges, propagate_dependency_failure
 from app.sockets import publish_event
 
 logger = logging.getLogger("taskforge.jobs")
@@ -52,6 +53,8 @@ def create_job(
     priority: int,
     max_retries: int,
     scheduled_at: datetime | None,
+    dependency_ids: list[uuid.UUID] | None = None,
+    max_dependency_graph_nodes: int = 1000,
 ) -> Job:
     """Persist a job and emit its notification only after commit."""
     now = datetime.now(timezone.utc)
@@ -68,6 +71,7 @@ def create_job(
     try:
         with session_scope() as session:
             add_job(session, job)
+            add_edges(session, job, dependency_ids or [], max_nodes=max_dependency_graph_nodes)
             session.commit()
     except SQLAlchemyError as exc:
         logger.exception("Database error while submitting job")
@@ -131,7 +135,7 @@ def list_jobs(
         raise JobDatabaseError from exc
 
 
-def cancel_job(job_id: uuid.UUID) -> Job:
+def cancel_job(job_id: uuid.UUID, *, max_dependency_propagation_depth: int = 50) -> Job:
     """Lock and cancel an eligible job atomically."""
     try:
         with session_scope() as session:
@@ -141,6 +145,7 @@ def cancel_job(job_id: uuid.UUID) -> Job:
             if job.status not in CANCELLABLE_STATUSES:
                 raise JobStateConflictError(job.status)
             job.status = JobStatus.CANCELLED
+            propagate_dependency_failure(session, job.id, max_depth=max_dependency_propagation_depth)
             session.commit()
             session.refresh(job)
             session.expunge(job)

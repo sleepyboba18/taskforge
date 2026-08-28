@@ -8,6 +8,7 @@ from app.models.dead_letter import DeadLetterJob
 from app.models.worker import Worker
 from app.models.user import User, UserRole
 from app.models.rate_limit import RateLimitRecord
+from app.models.job_dependency import JobDependency
 
 __all__ = [
 	"AttemptStatus",
@@ -21,4 +22,5 @@ __all__ = [
 	"User",
 	"UserRole",
 	"RateLimitRecord",
+	"JobDependency",
 ]
