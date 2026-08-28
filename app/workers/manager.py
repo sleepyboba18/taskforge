@@ -9,6 +9,7 @@ from app.config.settings import Settings
 from app.workers.worker import run_worker
 from app.workers.retry_scheduler import run_retry_scheduler
 from app.workers.scheduled_scheduler import run_scheduled_scheduler
+from app.workers.recurring_scheduler import run_recurring_scheduler
 
 logger = logging.getLogger("taskforge.worker_manager")
 
@@ -73,6 +74,19 @@ class WorkerManager:
         scheduled_scheduler.start()
         self._processes.append(scheduled_scheduler)
         logger.info("Started scheduled-job scheduler process")
+        recurring_scheduler = multiprocessing.Process(
+            target=run_recurring_scheduler,
+            kwargs={
+                "database_url": self.settings.database_url,
+                "poll_interval": self.settings.scheduler_poll_interval,
+                "batch_size": self.settings.scheduler_batch_size,
+                "shutdown_event": self._shutdown_event,
+            },
+            name="taskforge-recurring-scheduler",
+        )
+        recurring_scheduler.start()
+        self._processes.append(recurring_scheduler)
+        logger.info("Started recurring-job scheduler process")
 
     def stop(self) -> None:
         """Request graceful shutdown, then terminate only stragglers."""

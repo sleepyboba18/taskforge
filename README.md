@@ -99,3 +99,25 @@ Submit a job with a timezone-aware `scheduled_at` value to persist it as `SCHEDU
 ```
 
 The scheduler polls PostgreSQL and promotes due jobs from `SCHEDULED` to `PENDING` using short `FOR UPDATE SKIP LOCKED` transactions. Workers continue to claim only `PENDING` jobs. The original `scheduled_at` is preserved; retries use `next_retry_at` separately. Past or current scheduled times become immediately eligible as `PENDING`, while cancelled scheduled jobs are never promoted. Scheduling is polling-based, so `scheduled_at` is the earliest intended eligibility time rather than an exact execution guarantee. Configure `SCHEDULER_POLL_INTERVAL` and `SCHEDULER_BATCH_SIZE` in `.env`. Recurring scheduling is not implemented.
+
+## Recurring Jobs
+
+Recurring definitions are persisted in PostgreSQL and use standard five-field cron expressions with an explicit IANA timezone:
+
+```text
+POST /api/v1/recurring-jobs
+```
+
+```json
+{
+	"name": "daily-report",
+	"task_type": "echo",
+	"payload": {"report": "daily"},
+	"priority": 10,
+	"max_retries": 2,
+	"schedule": "0 9 * * *",
+	"timezone": "Asia/Kolkata"
+}
+```
+
+The recurring definition stores its next occurrence as UTC `next_run_at`. When due, the recurring scheduler locks the definition, creates one ordinary `PENDING` Job linked by `recurring_job_id`, records the occurrence in `last_run_at`, and advances `next_run_at` in the same transaction. It never executes task handlers. PostgreSQL locking prevents duplicate generation across scheduler processes, and overlap is allowed. Missed occurrences use the default `MISFIRE_POLICY=SKIP`: restart advances to the next future occurrence rather than generating a backlog. Use `GET /api/v1/recurring-jobs`, `GET /api/v1/recurring-jobs/<id>`, and the enable/disable endpoints to manage definitions. Disabling a definition does not delete generated execution history, and retries belong to each generated Job independently.

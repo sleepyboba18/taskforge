@@ -15,6 +15,7 @@ from app.models.enums import JobStatus
 
 if TYPE_CHECKING:
     from app.models.job_attempt import JobAttempt
+    from app.models.recurring_job import RecurringJob
     from app.models.worker import Worker
 
 
@@ -59,6 +60,10 @@ class Job(Base):
     worker_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("workers.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    recurring_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("recurring_jobs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     worker: Mapped["Worker | None"] = relationship(back_populates="jobs")
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="job")
+    recurring_job: Mapped["RecurringJob | None"] = relationship(back_populates="jobs")

@@ -32,6 +32,7 @@ class Settings:
     retry_batch_size: int
     scheduler_poll_interval: float
     scheduler_batch_size: int
+    misfire_policy: str
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -71,6 +72,7 @@ class Settings:
             retry_batch_size=_parse_bounded_int("RETRY_BATCH_SIZE", default=100, maximum=1000),
             scheduler_poll_interval=_parse_positive_float("SCHEDULER_POLL_INTERVAL", default=1.0),
             scheduler_batch_size=_parse_bounded_int("SCHEDULER_BATCH_SIZE", default=100, maximum=1000),
+            misfire_policy=os.getenv("MISFIRE_POLICY", "SKIP").strip().upper(),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False
@@ -78,6 +80,8 @@ class Settings:
         )
         if settings.retry_max_delay < settings.retry_base_delay:
             raise ConfigurationError("RETRY_MAX_DELAY must be greater than or equal to RETRY_BASE_DELAY.")
+        if settings.misfire_policy != "SKIP":
+            raise ConfigurationError("MISFIRE_POLICY currently supports only SKIP.")
         return settings
 
     def as_flask_config(self) -> dict[str, object]:
