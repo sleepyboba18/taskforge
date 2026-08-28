@@ -10,6 +10,7 @@ from app.workers.worker import run_worker
 from app.workers.retry_scheduler import run_retry_scheduler
 from app.workers.scheduled_scheduler import run_scheduled_scheduler
 from app.workers.recurring_scheduler import run_recurring_scheduler
+from app.workers.recovery_scheduler import run_recovery_scheduler
 
 logger = logging.getLogger("taskforge.worker_manager")
 
@@ -41,6 +42,7 @@ class WorkerManager:
                     "poll_interval": self.settings.worker_poll_interval,
                     "retry_base_delay": self.settings.retry_base_delay,
                     "retry_max_delay": self.settings.retry_max_delay,
+                    "heartbeat_interval": self.settings.worker_heartbeat_interval,
                     "shutdown_event": self._shutdown_event,
                 },
                 name=f"taskforge-worker-{index}",
@@ -87,6 +89,21 @@ class WorkerManager:
         recurring_scheduler.start()
         self._processes.append(recurring_scheduler)
         logger.info("Started recurring-job scheduler process")
+        recovery_scheduler = multiprocessing.Process(
+            target=run_recovery_scheduler,
+            kwargs={
+                "database_url": self.settings.database_url,
+                "poll_interval": self.settings.recovery_poll_interval,
+                "stale_timeout": self.settings.worker_stale_timeout,
+                "retry_base_delay": self.settings.retry_base_delay,
+                "retry_max_delay": self.settings.retry_max_delay,
+                "shutdown_event": self._shutdown_event,
+            },
+            name="taskforge-recovery-scheduler",
+        )
+        recovery_scheduler.start()
+        self._processes.append(recovery_scheduler)
+        logger.info("Started recovery scheduler process")
 
     def stop(self) -> None:
         """Request graceful shutdown, then terminate only stragglers."""

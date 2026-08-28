@@ -65,7 +65,9 @@ class Job(Base):
         UUID(as_uuid=True), ForeignKey("recurring_jobs.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
-    worker: Mapped["Worker | None"] = relationship(back_populates="jobs")
+    worker: Mapped["Worker | None"] = relationship(
+        back_populates="jobs", foreign_keys=[worker_id]
+    )
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="job")
     recurring_job: Mapped["RecurringJob | None"] = relationship(back_populates="jobs")
     dead_letter: Mapped["DeadLetterJob | None"] = relationship(back_populates="job", uselist=False)

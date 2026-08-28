@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import Worker, WorkerStatus
+from app.models import AttemptStatus, JobAttempt, Worker, WorkerStatus
+from sqlalchemy import update
 
 
 def register_worker(
@@ -43,4 +44,20 @@ def set_worker_status(session: Session, worker_id: uuid.UUID, status: WorkerStat
     worker.updated_at = now
     if status == WorkerStatus.STOPPED:
         worker.stopped_at = now
+        worker.current_job_id = None
     return worker
+
+
+def heartbeat_worker(session: Session, worker_id: uuid.UUID, heartbeat_at: datetime) -> bool:
+    """Record a lightweight heartbeat without loading the Worker row."""
+    result = session.execute(
+        update(Worker)
+        .where(Worker.id == worker_id, Worker.status.in_([WorkerStatus.IDLE, WorkerStatus.BUSY]))
+        .values(last_heartbeat_at=heartbeat_at, updated_at=heartbeat_at)
+    )
+    session.execute(
+        update(JobAttempt)
+        .where(JobAttempt.worker_id == worker_id, JobAttempt.status == AttemptStatus.RUNNING)
+        .values(last_heartbeat_at=heartbeat_at)
+    )
+    return result.rowcount == 1

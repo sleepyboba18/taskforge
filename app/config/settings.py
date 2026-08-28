@@ -33,6 +33,9 @@ class Settings:
     scheduler_poll_interval: float
     scheduler_batch_size: int
     misfire_policy: str
+    worker_heartbeat_interval: float
+    worker_stale_timeout: float
+    recovery_poll_interval: float
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -73,6 +76,9 @@ class Settings:
             scheduler_poll_interval=_parse_positive_float("SCHEDULER_POLL_INTERVAL", default=1.0),
             scheduler_batch_size=_parse_bounded_int("SCHEDULER_BATCH_SIZE", default=100, maximum=1000),
             misfire_policy=os.getenv("MISFIRE_POLICY", "SKIP").strip().upper(),
+            worker_heartbeat_interval=_parse_positive_float("WORKER_HEARTBEAT_INTERVAL", default=5.0),
+            worker_stale_timeout=_parse_positive_float("WORKER_STALE_TIMEOUT", default=30.0),
+            recovery_poll_interval=_parse_positive_float("RECOVERY_POLL_INTERVAL", default=10.0),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False
@@ -82,6 +88,8 @@ class Settings:
             raise ConfigurationError("RETRY_MAX_DELAY must be greater than or equal to RETRY_BASE_DELAY.")
         if settings.misfire_policy != "SKIP":
             raise ConfigurationError("MISFIRE_POLICY currently supports only SKIP.")
+        if settings.worker_stale_timeout <= settings.worker_heartbeat_interval:
+            raise ConfigurationError("WORKER_STALE_TIMEOUT must be greater than WORKER_HEARTBEAT_INTERVAL.")
         return settings
 
     def as_flask_config(self) -> dict[str, object]:

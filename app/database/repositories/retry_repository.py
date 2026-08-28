@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import AttemptStatus, Job, JobAttempt, JobStatus, WorkerStatus
+from app.models import AttemptStatus, Job, JobAttempt, JobStatus, Worker, WorkerStatus
 from app.database.repositories.dead_letter_repository import create_dead_letter
 from app.services.retry_policy import RetryPolicy
 from app.workers.registry import set_worker_status
@@ -76,6 +76,9 @@ def record_failure(
     if decision.should_retry:
         dead_letter_id = None
     set_worker_status(session, worker_id, WorkerStatus.IDLE)
+    worker = session.get(Worker, worker_id)
+    if worker is not None:
+        worker.current_job_id = None
     return RetryOutcome(
         job_id=job.id,
         attempt_id=attempt.id,

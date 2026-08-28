@@ -44,7 +44,7 @@ class ModelMetadataTests(unittest.TestCase):
     def test_controlled_status_values(self) -> None:
         self.assertEqual(7, len(JobStatus))
         self.assertEqual(3, len(AttemptStatus))
-        self.assertEqual(6, len(WorkerStatus))
+        self.assertEqual(7, len(WorkerStatus))
 
     def test_constraints_and_indexes_exist(self) -> None:
         constraint_names = {constraint.name for constraint in Job.__table__.constraints}

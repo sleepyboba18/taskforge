@@ -134,3 +134,15 @@ DELETE /api/v1/dead-letters/<id>
 ```
 
 Manual retry locks the DLQ record and Job, removes only the active DLQ record, returns the Job to `PENDING`, and preserves every historical `JobAttempt`. Workers then claim it normally. Deleting a DLQ record removes only the management record and never deletes the original Job or its attempts. DLQ records retain bounded error information, attempt count, final attempt ID, task type, source, and recurring-job linkage without automatic reprocessing.
+
+## Worker Heartbeats and Recovery
+
+Each worker registers a unique UUID and process instance in PostgreSQL, then sends heartbeats independently of task execution. Heartbeats use separate short-lived SQLAlchemy sessions and refresh both the Worker and active JobAttempt timestamps. Worker health is derived from PostgreSQL through `GET /api/v1/workers`, `GET /api/v1/workers/<worker_id>`, and `GET /api/v1/workers/health`.
+
+The recovery scheduler conservatively marks a worker `STALE` only after its heartbeat exceeds `WORKER_STALE_TIMEOUT`. It then locks and re-checks the Worker, Job, and running JobAttempt ownership before recovering an abandoned execution. Worker loss is recorded as `WORKER_LOST` and follows the existing retry policy or DLQ path. Graceful shutdown marks workers `STOPPED`, so they are not treated as crashed. Configure `WORKER_HEARTBEAT_INTERVAL`, `WORKER_STALE_TIMEOUT`, and `RECOVERY_POLL_INTERVAL`; defaults are 5, 30, and 10 seconds. Recovery emits `job:recovered` and does not broadcast every heartbeat.
+
+## Worker Heartbeats and Recovery
+
+Each worker registers a unique UUID and UUID-suffixed instance name in PostgreSQL, then updates `last_heartbeat_at` independently of task execution. Active attempts receive the same heartbeat timestamp through a separate SQLAlchemy session. Worker health is derived from PostgreSQL; `GET /api/v1/workers`, `GET /api/v1/workers/<worker_id>`, and `GET /api/v1/workers/health` expose safe status metadata.
+
+When a worker heartbeat exceeds `WORKER_STALE_TIMEOUT`, the recovery scheduler locks and re-checks the Worker, Job, and running JobAttempt. Only a matching `STALE` worker with a still-running owned attempt is recovered. Worker loss is recorded as `WORKER_LOST`, then the existing retry policy sends the Job to `RETRYING` or the existing DLQ. Graceful shutdown marks workers `STOPPED`, and does not treat them as stale. Configure `WORKER_HEARTBEAT_INTERVAL`, `WORKER_STALE_TIMEOUT`, and `RECOVERY_POLL_INTERVAL`; the defaults are 5, 30, and 10 seconds.

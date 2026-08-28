@@ -13,7 +13,6 @@ logger = logging.getLogger("taskforge")
 
 
 def main() -> None:
-    """Create the application and run the development server."""
     try:
         settings = Settings.from_environment()
         app = create_app(settings)

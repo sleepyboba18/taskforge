@@ -6,6 +6,7 @@ from typing import Any
 
 from app.models import Job
 from app.models import DeadLetterJob
+from app.models import Worker
 
 
 def job_to_dict(job: Job) -> dict[str, Any]:
@@ -51,4 +52,19 @@ def dead_letter_to_dict(record: DeadLetterJob) -> dict[str, Any]:
         "recurring_job_id": str(record.recurring_job_id) if record.recurring_job_id else None,
         "created_at": _isoformat(record.created_at),
         "updated_at": _isoformat(record.updated_at),
+    }
+
+
+def worker_to_dict(worker: Worker) -> dict[str, Any]:
+    """Convert worker health metadata to a JSON-safe representation."""
+    return {
+        "worker_id": str(worker.id),
+        "worker_name": worker.worker_name,
+        "hostname": worker.hostname,
+        "process_id": worker.process_id,
+        "status": worker.status.value,
+        "started_at": _isoformat(worker.started_at),
+        "last_heartbeat_at": _isoformat(worker.last_heartbeat_at),
+        "stopped_at": _isoformat(worker.stopped_at),
+        "current_job_id": str(worker.current_job_id) if worker.current_job_id else None,
     }

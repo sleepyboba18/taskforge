@@ -38,6 +38,7 @@ class JobAttempt(Base):
         SqlEnum(AttemptStatus, name="attempt_status"), nullable=False, default=AttemptStatus.RUNNING
     )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(4000), nullable=True)
 

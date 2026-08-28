@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import AttemptStatus, Job, JobAttempt, JobStatus
+from app.models import AttemptStatus, Job, JobAttempt, JobStatus, Worker
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,10 +50,14 @@ def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
         worker_id=worker_id,
         status=AttemptStatus.RUNNING,
         started_at=now,
+        last_heartbeat_at=now,
     )
     job.status = JobStatus.RUNNING
     job.worker_id = worker_id
     job.started_at = now
+    worker = session.get(Worker, worker_id)
+    if worker is not None:
+        worker.current_job_id = job.id
     session.add(attempt)
     session.flush()
     return ClaimedJob(job.id, attempt.id, job.task_type, dict(job.payload), worker_id)

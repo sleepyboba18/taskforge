@@ -32,3 +32,4 @@ class WorkerStatus(str, Enum):
     STOPPING = "STOPPING"
     STOPPED = "STOPPED"
     UNHEALTHY = "UNHEALTHY"
+    STALE = "STALE"

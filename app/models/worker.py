@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum as SqlEnum, Integer, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,9 @@ class Worker(Base):
     )
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
     process_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -41,5 +44,7 @@ class Worker(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    jobs: Mapped[list["Job"]] = relationship(back_populates="worker")
+    jobs: Mapped[list["Job"]] = relationship(
+        back_populates="worker", foreign_keys="Job.worker_id"
+    )
     attempts: Mapped[list["JobAttempt"]] = relationship(back_populates="worker")
