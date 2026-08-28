@@ -265,6 +265,34 @@ Scheduler polling remains owned by the existing scheduler processes. No second s
 
 Administrative status is available at `GET /api/v1/admin/status` and reuses monitoring data. State changes use short PostgreSQL transactions, row locks where needed, existing request IDs, and audit records. Secrets, tokens, credentials, and Job payloads are never accepted as audit metadata or returned by these APIs.
 
+## API
+
+Versioned JSON endpoints live under `/api/v1`. Routes validate input, apply the existing JWT, RBAC, and PostgreSQL rate-limit layers, call services, and serialize safe responses. Public `/health` and `/ready` retain their lightweight liveness/readiness roles.
+
+## Authentication
+
+Protected endpoints require the existing Bearer JWT and role checks. Invalid credentials return JSON errors without revealing resource existence or exposing tokens. Administrative and monitoring APIs require elevated roles.
+
+## Error Responses
+
+API errors use the existing `success: false` envelope with an error code/message, request ID, and optional details. Malformed JSON, unsupported methods, unknown routes, oversized bodies, database failures, and unexpected exceptions return JSON rather than HTML. Stack traces and infrastructure details remain internal.
+
+## Pagination
+
+Paginated collections use bounded `page` and `per_page` parameters with SQL-level pagination and metadata. Invalid or oversized values are rejected.
+
+## Filtering
+
+Filters and sorts use explicit allowlists. Job listing supports `status`, `task_type`, `priority`, and safe sort values such as `-created_at`, `priority`, and `status`; arbitrary SQL expressions and unknown query parameters are rejected. Accepted timestamps are timezone-aware and normalized to UTC.
+
+## Rate Limiting
+
+External API endpoints use the existing PostgreSQL-backed limiter where configured. `429` responses remain JSON with retry metadata, while health endpoints remain outside normal user API limits.
+
+## Administrative API
+
+Administrative controls live under `/api/v1/admin`, require `OPERATOR` or `ADMIN`, validate bounded inputs, use transactional state changes, and write audit events. Configure `MAX_REQUEST_BODY_MB` (default `2`) to bound request bodies. In production, use a strong `SECRET_KEY` and explicit `CORS_ORIGINS`; wildcard origins are development-only.
+
 ## Concurrency Model
 
 PostgreSQL is TaskForge's authoritative coordination layer. Independent worker processes use row-level locks and `FOR UPDATE SKIP LOCKED`; Python globals, files, and local locks are never used for distributed state.

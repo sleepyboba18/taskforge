@@ -101,6 +101,8 @@ def _validate_create(body: Any):
     if not isinstance(body, dict):
         return {}, {"body": "Request body must be a JSON object."}
     errors = {}
+    if set(body) - {"username", "email", "password", "role"}:
+        errors["unknown_fields"] = "Unsupported request fields."
     username, email, password, role_value = (body.get(key) for key in ("username", "email", "password", "role"))
     if not isinstance(username, str) or not username.strip() or len(username.strip()) > 128:
         errors["username"] = "Username is required and must be at most 128 characters."

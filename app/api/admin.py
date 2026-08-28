@@ -40,6 +40,8 @@ def _reason():
         return None
     if not isinstance(body, dict):
         raise ValueError("Request body must be a JSON object.")
+    if set(body) - {"reason"}:
+        raise ValueError("Unsupported request fields.")
     reason = body.get("reason")
     if reason is not None and (not isinstance(reason, str) or len(reason) > 500 or any(ord(char) < 32 and char not in "\t" for char in reason)):
         raise ValueError("reason must be at most 500 characters without control characters.")

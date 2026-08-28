@@ -37,6 +37,7 @@ def list_jobs(
     status: JobStatus | None = None,
     task_type: str | None = None,
     priority: int | None = None,
+    sort: str = "-created_at",
 ) -> tuple[list[Job], int]:
     """Query filtered jobs and count rows in the database."""
     filters: list[Any] = []
@@ -50,10 +51,13 @@ def list_jobs(
     count_statement = select(func.count()).select_from(Job).where(*filters)
     total = session.scalar(count_statement) or 0
 
+    sort_fields = {"created_at": Job.created_at, "priority": Job.priority, "status": Job.status}
+    sort_field = sort_fields[sort.lstrip("-")]
+    ordering = sort_field.desc() if sort.startswith("-") else sort_field.asc()
     statement: Select[tuple[Job]] = (
         select(Job)
         .where(*filters)
-        .order_by(Job.created_at.desc(), Job.id.asc())
+        .order_by(ordering, Job.id.asc())
         .offset((page - 1) * per_page)
         .limit(per_page)
     )

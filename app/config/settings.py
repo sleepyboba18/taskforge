@@ -65,6 +65,7 @@ class Settings:
     dlq_backlog_warning_threshold: int
     worker_saturation_threshold_percent: int
     admin_bulk_action_limit: int
+    max_request_body_mb: int
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -141,6 +142,7 @@ class Settings:
             dlq_backlog_warning_threshold=_parse_non_negative_bounded_int("DLQ_BACKLOG_WARNING_THRESHOLD", default=50, maximum=1000000),
             worker_saturation_threshold_percent=_parse_bounded_int("WORKER_SATURATION_THRESHOLD_PERCENT", default=90, maximum=100),
             admin_bulk_action_limit=_parse_bounded_int("ADMIN_BULK_ACTION_LIMIT", default=100, maximum=1000),
+            max_request_body_mb=_parse_bounded_int("MAX_REQUEST_BODY_MB", default=2, maximum=50),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False
@@ -167,6 +169,10 @@ class Settings:
             raise ConfigurationError("LOG_LEVEL must be a standard logging level.")
         if settings.metrics_default_window not in {"1h", "24h", "7d"}:
             raise ConfigurationError("METRICS_DEFAULT_WINDOW must be 1h, 24h, or 7d.")
+        if settings.app_env.lower() == "production" and (settings.secret_key in {"", "change-me"} or len(settings.secret_key) < 32):
+            raise ConfigurationError("SECRET_KEY must be explicitly configured and at least 32 characters in production.")
+        if settings.app_env.lower() == "production" and settings.cors_origins == "*":
+            raise ConfigurationError("CORS_ORIGINS must be explicit in production.")
         return settings
 
     def as_flask_config(self) -> dict[str, object]:

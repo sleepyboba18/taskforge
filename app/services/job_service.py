@@ -126,6 +126,7 @@ def list_jobs(
     status: JobStatus | None = None,
     task_type: str | None = None,
     priority: int | None = None,
+    sort: str = "-created_at",
 ) -> tuple[list[Job], int]:
     """Return one database-paginated page and its database count."""
     try:
@@ -137,6 +138,7 @@ def list_jobs(
                 status=status,
                 task_type=task_type,
                 priority=priority,
+                sort=sort,
             )
             for job in jobs:
                 session.expunge(job)

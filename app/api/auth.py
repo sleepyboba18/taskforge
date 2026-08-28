@@ -18,6 +18,8 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/api/v1/auth")
 @rate_limit("auth")
 def login():
     body = request.get_json(silent=True)
+    if isinstance(body, dict) and set(body) - {"username", "password"}:
+        return _error("validation_error", 400)
     if not isinstance(body, dict) or not isinstance(body.get("username"), str) or not isinstance(body.get("password"), str):
         return _error("validation_error", 400)
     try:
@@ -43,7 +45,7 @@ def me():
 @rate_limit("write")
 def change_own_password():
     body = request.get_json(silent=True)
-    if not isinstance(body, dict):
+    if not isinstance(body, dict) or set(body) - {"current_password", "new_password"}:
         return _error("validation_error", 400)
     current = body.get("current_password")
     new = body.get("new_password")

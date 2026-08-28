@@ -8,6 +8,8 @@ import uuid
 from typing import Any
 
 from flask import Flask, g, jsonify, request
+from werkzeug.exceptions import BadRequest, MethodNotAllowed, NotFound, RequestEntityTooLarge, UnsupportedMediaType
+from sqlalchemy.exc import SQLAlchemyError
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 
@@ -34,12 +36,21 @@ def _register_error_handlers(app: Flask) -> None:
     @app.errorhandler(HTTPException)
     def handle_http_error(error: HTTPException):
         status_code = error.code or 500
-        return jsonify({"success": False, "error": {"code": error.name.lower().replace(" ", "_"), "message": error.name}, "request_id": getattr(g, "request_id", None)}), status_code
+        code = {
+            400: "VALIDATION_ERROR", 404: "RESOURCE_NOT_FOUND", 405: "METHOD_NOT_ALLOWED",
+            413: "PAYLOAD_TOO_LARGE", 415: "UNSUPPORTED_MEDIA_TYPE",
+        }.get(status_code, "HTTP_ERROR")
+        return jsonify({"success": False, "error": {"code": code, "message": error.description or error.name}, "request_id": getattr(g, "request_id", None)}), status_code
+
+    @app.errorhandler(SQLAlchemyError)
+    def handle_database_error(error: SQLAlchemyError):
+        logger.exception("Database error: %s", type(error).__name__)
+        return jsonify({"success": False, "error": {"code": "DATABASE_ERROR", "message": "Database operation failed."}, "request_id": getattr(g, "request_id", None)}), 503
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error: Exception):
-        logger.exception("Unexpected application error: %s", type(error).__name__)
-        return jsonify({"success": False, "error": {"code": "internal_server_error", "message": "Internal Server Error"}, "request_id": getattr(g, "request_id", None)}), 500
+        logger.exception("Unexpected application error: %s", type(error).__name__, extra={"request_id": getattr(g, "request_id", None), "method": request.method, "path": request.path})
+        return jsonify({"success": False, "error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}, "request_id": getattr(g, "request_id", None)}), 500
 
 
 def create_app(settings: Settings | None = None) -> Flask:
@@ -50,6 +61,7 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     app = Flask(__name__)
     app.config.from_mapping(settings.as_flask_config())
+    app.config["MAX_CONTENT_LENGTH"] = settings.max_request_body_mb * 1024 * 1024
     app.config["TASKFORGE_SETTINGS"] = settings
 
     cors_origins: str | list[str] = settings.cors_origins
@@ -68,6 +80,11 @@ def create_app(settings: Settings | None = None) -> Flask:
         request_id = getattr(g, "request_id", None)
         if request_id:
             response.headers["X-Request-ID"] = request_id
+            if response.is_json:
+                body = response.get_json(silent=True)
+                if isinstance(body, dict) and body.get("success") is False and "request_id" not in body:
+                    body["request_id"] = request_id
+                    response.set_data(jsonify(body).get_data())
         started_at = getattr(g, "request_started_at", None)
         if started_at is not None:
             duration_ms = (time.monotonic() - started_at) * 1000
@@ -96,6 +113,10 @@ def create_app(settings: Settings | None = None) -> Flask:
             request_id = str(uuid.uuid4())
         g.request_id = request_id
         g.request_started_at = time.monotonic()
+        if request.path.startswith("/api/") and request.method in {"POST", "PUT", "PATCH"} and request.content_length and not request.is_json:
+            raise UnsupportedMediaType("API request bodies must use application/json.")
+        if request.path.startswith("/api/") and request.is_json and request.content_length:
+            request.get_json(silent=False)
 
     logger.info("Configured %s application in %s mode", settings.app_name, settings.app_env)
     return app

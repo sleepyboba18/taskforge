@@ -254,6 +254,9 @@ def _mutate_dependency(job_id: str, dependency_job_id: str | None = None, *, add
 
 def _validate_job_input(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     errors: dict[str, str] = {}
+    unknown = set(body) - {"name", "task_type", "payload", "priority", "max_retries", "scheduled_at", "dependencies", "workflow_id"}
+    if unknown:
+        errors["unknown_fields"] = "Unsupported fields: " + ", ".join(sorted(unknown))
     name = body.get("name")
     task_type = body.get("task_type")
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 255:
@@ -321,6 +324,9 @@ def _parse_scheduled_at(value: Any) -> tuple[datetime | None, str | None]:
 
 def _validate_list_query(args: Any) -> tuple[dict[str, Any], dict[str, str]]:
     errors: dict[str, str] = {}
+    unknown = set(args) - {"page", "per_page", "status", "task_type", "priority", "sort"}
+    if unknown:
+        errors["unknown_filters"] = "Unsupported query parameters: " + ", ".join(sorted(unknown))
     page = _parse_query_int(args.get("page", "1"), "page", errors)
     per_page = _parse_query_int(args.get("per_page", str(DEFAULT_PER_PAGE)), "per_page", errors)
     if page is not None and page < 1:
@@ -344,9 +350,12 @@ def _validate_list_query(args: Any) -> tuple[dict[str, Any], dict[str, str]]:
     task_type = args.get("task_type")
     if task_type == "":
         errors["task_type"] = "Task type must not be empty."
+    sort = args.get("sort", "-created_at")
+    if sort not in {"created_at", "-created_at", "priority", "-priority", "status", "-status"}:
+        errors["sort"] = "Sort must be created_at, priority, or status with an optional leading '-'."
     if errors:
         return {}, errors
-    return {"page": page, "per_page": per_page, "status": status, "task_type": task_type, "priority": priority}, {}
+    return {"page": page, "per_page": per_page, "status": status, "task_type": task_type, "priority": priority, "sort": sort}, {}
 
 
 def _parse_query_int(value: str, field: str, errors: dict[str, str]) -> int | None:

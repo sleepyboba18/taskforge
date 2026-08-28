@@ -61,7 +61,7 @@ def _workflow_dict(workflow, summary=None):
 @rate_limit("write")
 def create_workflow_endpoint():
     body = request.get_json(silent=True)
-    if not isinstance(body, dict) or not isinstance(body.get("name"), str) or not body["name"].strip() or len(body["name"].strip()) > 255:
+    if not isinstance(body, dict) or set(body) - {"name", "description"} or not isinstance(body.get("name"), str) or not body["name"].strip() or len(body["name"].strip()) > 255:
         return _error("VALIDATION_ERROR", "Name is required and must be at most 255 characters.", 400)
     description = body.get("description")
     if description is not None and (not isinstance(description, str) or len(description) > 4000):
