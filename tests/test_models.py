@@ -9,13 +9,13 @@ import uuid
 from sqlalchemy import inspect
 
 from app.database.session import Base
-from app.models import AttemptStatus, Job, JobAttempt, JobDependency, JobStatus, Worker, WorkerStatus
+from app.models import AttemptStatus, Job, JobAttempt, JobDependency, JobStatus, Worker, WorkerStatus, Workflow
 
 
 class ModelMetadataTests(unittest.TestCase):
     def test_all_models_are_registered(self) -> None:
         self.assertEqual(
-            {"jobs", "job_attempts", "workers", "recurring_jobs", "dead_letter_jobs", "users", "rate_limit_records", "job_dependencies"},
+            {"jobs", "job_attempts", "workers", "recurring_jobs", "dead_letter_jobs", "users", "rate_limit_records", "job_dependencies", "workflows"},
             set(Base.metadata.tables),
         )
 
@@ -35,7 +35,7 @@ class ModelMetadataTests(unittest.TestCase):
 
     def test_relationships_are_bidirectional(self) -> None:
         self.assertEqual(
-            {"worker", "attempts", "recurring_job", "dead_letter", "dependencies", "dependents"},
+            {"worker", "attempts", "recurring_job", "dead_letter", "dependencies", "dependents", "workflow"},
             set(Job.__mapper__.relationships.keys()),
         )
         self.assertEqual({"job", "worker"}, set(JobAttempt.__mapper__.relationships.keys()))
@@ -55,6 +55,7 @@ class ModelMetadataTests(unittest.TestCase):
         index_names = {index.name for index in Job.__table__.indexes}
         self.assertIn("ix_jobs_queue_claim", index_names)
         self.assertIn("uq_job_dependency_edge", {constraint.name for constraint in JobDependency.__table__.constraints})
+        self.assertIn("ix_workflows_status_created_at", {index.name for index in Workflow.__table__.indexes})
 
 
 @unittest.skipUnless(os.getenv("TASKFORGE_TEST_DATABASE_URL"), "requires PostgreSQL test database")

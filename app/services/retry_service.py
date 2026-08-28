@@ -9,9 +9,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database.repositories.retry_repository import RetryOutcome, record_failure
 from app.database.session import session_scope
-from app.models import JobStatus
+from app.models import Job, JobStatus
 from app.services.retry_policy import RetryPolicy
 from app.services.dependency_service import propagate_dependency_failure
+from app.services.workflow_service import update_workflow_status
 
 logger = logging.getLogger("taskforge.retry")
 
@@ -44,6 +45,8 @@ def handle_task_failure(
             )
             if outcome.status == JobStatus.FAILED:
                 propagate_dependency_failure(session, job_id, max_depth=max_dependency_propagation_depth)
+            job = session.get(Job, job_id)
+            update_workflow_status(session, job.workflow_id if job else None)
             session.commit()
             return outcome
     except SQLAlchemyError as exc:

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.models.dead_letter import DeadLetterJob
     from app.models.job_dependency import JobDependency
     from app.models.worker import Worker
+    from app.models.workflow import Workflow
 
 
 class Job(Base):
@@ -38,6 +39,7 @@ class Job(Base):
         ),
         Index("ix_jobs_status_priority_created", "status", desc("priority"), "created_at"),
         Index("ix_jobs_retry_promotion", "status", "next_retry_at"),
+        Index("ix_jobs_workflow_id", "workflow_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -65,6 +67,9 @@ class Job(Base):
     recurring_job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("recurring_jobs.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     worker: Mapped["Worker | None"] = relationship(
         back_populates="jobs", foreign_keys=[worker_id]
@@ -78,3 +83,4 @@ class Job(Base):
     dependents: Mapped[list["JobDependency"]] = relationship(
         foreign_keys="JobDependency.depends_on_job_id", back_populates="depends_on", cascade="all, delete-orphan"
     )
+    workflow: Mapped["Workflow | None"] = relationship(back_populates="jobs")

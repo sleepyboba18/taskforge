@@ -18,6 +18,7 @@ from app.models import AttemptStatus, Job, JobAttempt, JobStatus, Worker, Worker
 from app.services.task_executor import TaskRegistry
 from app.services.retry_policy import RetryPolicy
 from app.services.retry_service import RetryDatabaseError, handle_task_failure
+from app.services.workflow_service import update_workflow_status
 from app.sockets import publish_event
 from app.workers.registry import heartbeat_worker, register_worker, set_worker_status
 
@@ -167,6 +168,7 @@ def _complete_job(claimed: ClaimedJob) -> None:
             if worker is not None:
                 worker.current_job_id = None
             set_worker_status(session, claimed.worker_id, WorkerStatus.IDLE)
+            update_workflow_status(session, job.workflow_id)
             session.commit()
     except SQLAlchemyError:
         logger.exception("Database error completing job %s", claimed.job_id)

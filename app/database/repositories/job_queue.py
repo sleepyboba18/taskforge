@@ -11,6 +11,7 @@ from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.models import AttemptStatus, Job, JobAttempt, JobDependency, JobStatus, Worker
+from app.services.workflow_service import update_workflow_status
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,7 @@ def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
         last_heartbeat_at=now,
     )
     job.status = JobStatus.RUNNING
+    update_workflow_status(session, job.workflow_id)
     job.worker_id = worker_id
     job.started_at = now
     worker = session.get(Worker, worker_id)

@@ -16,7 +16,7 @@ from app.database.repositories.job_repository import (
     list_jobs as repository_list_jobs,
 )
 from app.database.session import session_scope
-from app.models import Job, JobStatus
+from app.models import DeadLetterJob, Job, JobStatus, Workflow
 from app.services.dependency_service import add_edges, propagate_dependency_failure
 from app.sockets import publish_event
 
@@ -55,6 +55,7 @@ def create_job(
     scheduled_at: datetime | None,
     dependency_ids: list[uuid.UUID] | None = None,
     max_dependency_graph_nodes: int = 1000,
+    workflow_id: uuid.UUID | None = None,
 ) -> Job:
     """Persist a job and emit its notification only after commit."""
     now = datetime.now(timezone.utc)
@@ -67,12 +68,17 @@ def create_job(
         max_retries=max_retries,
         scheduled_at=scheduled_at,
         status=status,
+        workflow_id=workflow_id,
     )
     try:
         with session_scope() as session:
+            if workflow_id is not None and session.get(Workflow, workflow_id) is None:
+                raise JobNotFoundError("Workflow not found")
             add_job(session, job)
             add_edges(session, job, dependency_ids or [], max_nodes=max_dependency_graph_nodes)
             session.commit()
+    except JobNotFoundError:
+        raise
     except SQLAlchemyError as exc:
         logger.exception("Database error while submitting job")
         raise JobDatabaseError from exc
@@ -158,6 +164,52 @@ def cancel_job(job_id: uuid.UUID, *, max_dependency_propagation_depth: int = 50)
     logger.info("Job cancelled: %s", job_id)
     _emit("job:cancelled", {"id": str(job.id), "status": job.status.value})
     return job
+
+
+def bulk_cancel_jobs(job_ids: list[uuid.UUID], *, max_dependency_propagation_depth: int = 50) -> list[dict[str, Any]]:
+    results = []
+    try:
+        with session_scope() as session:
+            for job_id in job_ids:
+                job = get_job_for_update(session, job_id)
+                if job is None:
+                    results.append({"job_id": str(job_id), "status": "not_found"})
+                    continue
+                if job.status not in CANCELLABLE_STATUSES:
+                    results.append({"job_id": str(job_id), "status": "not_cancellable", "reason": f"Job is {job.status.value}."})
+                    continue
+                job.status = JobStatus.CANCELLED
+                job.completed_at = datetime.now(timezone.utc)
+                propagate_dependency_failure(session, job.id, max_depth=max_dependency_propagation_depth)
+                results.append({"job_id": str(job_id), "status": "cancelled"})
+            session.commit()
+    except SQLAlchemyError as exc:
+        raise JobDatabaseError from exc
+    return results
+
+
+def bulk_retry_jobs(job_ids: list[uuid.UUID]) -> list[dict[str, Any]]:
+    results = []
+    try:
+        with session_scope() as session:
+            for job_id in job_ids:
+                job = get_job_for_update(session, job_id)
+                if job is None:
+                    results.append({"job_id": str(job_id), "status": "not_found"})
+                    continue
+                if job.status != JobStatus.FAILED or job.retry_count >= job.max_retries:
+                    results.append({"job_id": str(job_id), "status": "not_retryable"})
+                    continue
+                job.status = JobStatus.PENDING
+                job.completed_at = None
+                job.last_error = None
+                job.next_retry_at = None
+                session.query(DeadLetterJob).filter(DeadLetterJob.job_id == job.id).delete(synchronize_session=False)
+                results.append({"job_id": str(job_id), "status": "retrying"})
+            session.commit()
+    except SQLAlchemyError as exc:
+        raise JobDatabaseError from exc
+    return results
 
 
 def _event_payload(job: Job) -> dict[str, Any]:

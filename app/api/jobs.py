@@ -19,6 +19,8 @@ from app.services.job_service import (
     JobNotFoundError,
     JobStateConflictError,
     cancel_job,
+    bulk_cancel_jobs,
+    bulk_retry_jobs,
     create_job,
     get_job_by_id,
     list_jobs,
@@ -41,6 +43,39 @@ MAX_PER_PAGE = 100
 DEFAULT_PER_PAGE = 20
 
 
+@jobs_bp.post("/bulk/cancel")
+@require_roles(*OPERATORS)
+@rate_limit("write")
+def bulk_cancel_endpoint():
+    return _bulk_action(bulk_cancel_jobs, "cancel")
+
+
+@jobs_bp.post("/bulk/retry")
+@require_roles(*OPERATORS)
+@rate_limit("write")
+def bulk_retry_endpoint():
+    return _bulk_action(bulk_retry_jobs, "retry")
+
+
+def _bulk_action(action, operation):
+    body = request.get_json(silent=True)
+    ids = body.get("job_ids") if isinstance(body, dict) else None
+    maximum = current_app.config["TASKFORGE_SETTINGS"].max_bulk_job_operations
+    if not isinstance(ids, list) or len(ids) > maximum or len(set(ids)) != len(ids):
+        return _error("VALIDATION_ERROR", f"job_ids must be a unique array of at most {maximum} UUIDs.", status=400)
+    try:
+        parsed = [uuid.UUID(value) for value in ids if isinstance(value, str)]
+    except ValueError:
+        parsed = []
+    if len(parsed) != len(ids):
+        return _error("VALIDATION_ERROR", "job_ids must contain only valid UUID strings.", status=400)
+    try:
+        results = action(parsed, max_dependency_propagation_depth=current_app.config["TASKFORGE_SETTINGS"].max_dependency_propagation_depth) if operation == "cancel" else action(parsed)
+    except JobDatabaseError:
+        return _error("DATABASE_ERROR", f"Unable to bulk {operation} jobs.", status=500)
+    return jsonify({"success": True, "data": {"requested": len(results), "succeeded": sum(result["status"] in {"cancelled", "retrying"} for result in results), "failed": sum(result["status"] not in {"cancelled", "retrying"} for result in results), "results": results}})
+
+
 @jobs_bp.post("")
 @require_roles(*OPERATORS)
 @rate_limit("write")
@@ -59,6 +94,8 @@ def submit_job():
             **values,
             max_dependency_graph_nodes=current_app.config["TASKFORGE_SETTINGS"].max_dependency_graph_nodes,
         )
+    except JobNotFoundError:
+        return _error("WORKFLOW_NOT_FOUND", "Workflow not found.", status=404)
     except DependencyNotFoundError as exc:
         return _error("DEPENDENCY_NOT_FOUND", f"Dependency job {exc} was not found.", status=404)
     except DependencyCycleError:
@@ -239,6 +276,14 @@ def _validate_job_input(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str,
     scheduled_at, scheduled_error = _parse_scheduled_at(body.get("scheduled_at"))
     if scheduled_error:
         errors["scheduled_at"] = scheduled_error
+    workflow_id = None
+    if body.get("workflow_id") is not None:
+        try:
+            workflow_id = uuid.UUID(body["workflow_id"]) if isinstance(body["workflow_id"], str) else None
+        except ValueError:
+            workflow_id = None
+        if workflow_id is None:
+            errors["workflow_id"] = "Workflow ID must be a valid UUID."
     try:
         dependency_ids = validate_dependency_ids(
             body.get("dependencies"),
@@ -256,6 +301,7 @@ def _validate_job_input(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str,
         "max_retries": max_retries,
         "scheduled_at": scheduled_at,
         "dependency_ids": dependency_ids,
+        "workflow_id": workflow_id,
     }, {}
 
 

@@ -29,6 +29,7 @@ def job_to_dict(job: Job) -> dict[str, Any]:
         "last_error": job.last_error,
         "worker_id": str(job.worker_id) if job.worker_id else None,
         "recurring_job_id": str(job.recurring_job_id) if job.recurring_job_id else None,
+        "workflow_id": str(job.workflow_id) if job.workflow_id else None,
     }
 
 

@@ -9,6 +9,7 @@ from app.models.worker import Worker
 from app.models.user import User, UserRole
 from app.models.rate_limit import RateLimitRecord
 from app.models.job_dependency import JobDependency
+from app.models.workflow import Workflow, WorkflowStatus
 
 __all__ = [
 	"AttemptStatus",
@@ -23,4 +24,6 @@ __all__ = [
 	"UserRole",
 	"RateLimitRecord",
 	"JobDependency",
+	"Workflow",
+	"WorkflowStatus",
 ]

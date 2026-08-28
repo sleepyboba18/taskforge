@@ -58,6 +58,7 @@ class Settings:
     max_dependency_graph_depth: int
     max_dependency_graph_nodes: int
     max_dependency_propagation_depth: int
+    max_bulk_job_operations: int
     cors_origins: str | list[str]
     cors_supports_credentials: bool
 
@@ -127,6 +128,7 @@ class Settings:
             max_dependency_graph_depth=_parse_bounded_int("MAX_DEPENDENCY_GRAPH_DEPTH", default=50, maximum=1000),
             max_dependency_graph_nodes=_parse_bounded_int("MAX_DEPENDENCY_GRAPH_NODES", default=1000, maximum=100000),
             max_dependency_propagation_depth=_parse_bounded_int("MAX_DEPENDENCY_PROPAGATION_DEPTH", default=50, maximum=1000),
+            max_bulk_job_operations=_parse_bounded_int("MAX_BULK_JOB_OPERATIONS", default=100, maximum=1000),
             cors_origins=cors_origins,
             cors_supports_credentials=cors_origins != "*" and _parse_bool(
                 "CORS_SUPPORTS_CREDENTIALS", default=False

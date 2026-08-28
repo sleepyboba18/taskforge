@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import aliased
 
 from app.database.session import check_database_connection, session_scope
-from app.models import AttemptStatus, DeadLetterJob, Job, JobAttempt, JobDependency, JobStatus, Worker, WorkerStatus
+from app.models import AttemptStatus, DeadLetterJob, Job, JobAttempt, JobDependency, JobStatus, Worker, WorkerStatus, Workflow, WorkflowStatus
 
 logger = logging.getLogger("taskforge.observability")
 
@@ -80,6 +80,7 @@ def collect_metrics(*, window: str) -> dict[str, Any]:
                 select(func.count()).select_from(Worker).where(Worker.status == WorkerStatus.STALE)
             ) or 0
             total_workers = session.scalar(select(func.count()).select_from(Worker)) or 0
+            workflow_counts = dict(session.execute(select(Workflow.status, func.count()).group_by(Workflow.status)).all())
             dependency_edges = session.scalar(select(func.count()).select_from(JobDependency)) or 0
             dependency_parent = aliased(Job)
             dependency_waiting = session.scalar(
@@ -138,6 +139,14 @@ def collect_metrics(*, window: str) -> dict[str, Any]:
                     "waiting_jobs": dependency_waiting,
                     "blocked_jobs": dependency_blocked,
                     "dependency_edges": dependency_edges,
+                },
+                "workflows": {
+                    "total": sum(workflow_counts.values()),
+                    "pending": workflow_counts.get(WorkflowStatus.PENDING, 0),
+                    "running": workflow_counts.get(WorkflowStatus.RUNNING, 0),
+                    "succeeded": workflow_counts.get(WorkflowStatus.SUCCEEDED, 0),
+                    "failed": workflow_counts.get(WorkflowStatus.FAILED, 0),
+                    "cancelled": workflow_counts.get(WorkflowStatus.CANCELLED, 0),
                 },
             }
     except (SQLAlchemyError, KeyError) as exc:

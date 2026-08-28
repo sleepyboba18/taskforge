@@ -54,7 +54,7 @@ Configure `JWT_SECRET_KEY` and `JWT_ACCESS_TOKEN_EXPIRES_MINUTES` in `.env`; no 
 
 `GET /health` is public liveness and reports whether the Flask process is responding. `GET /ready` is public readiness and performs a lightweight PostgreSQL connectivity check, returning `503` when the database is unavailable. Neither endpoint exposes infrastructure details.
 
-Authenticated users can query `GET /api/v1/health` for database, worker, scheduler, and queue state, and `GET /api/v1/metrics` for PostgreSQL-derived queue counts, throughput, execution latency, success/failure rates, DLQ counts, and worker counts. Metrics supports the strict windows `1h`, `24h`, and `7d`. Viewers, operators, and administrators may read these endpoints.
+Authenticated users can query `GET /api/v1/health` for database, worker, scheduler, and queue state, and `GET /api/v1/metrics` for PostgreSQL-derived queue counts, workflow totals, dependency counts, throughput, execution latency, success/failure rates, DLQ counts, and worker counts. Metrics supports the strict windows `1h`, `24h`, and `7d`. Viewers, operators, and administrators may read these endpoints.
 
 Every HTTP response includes an `X-Request-ID`. A valid client-supplied request ID is reused; otherwise TaskForge generates a UUID. Request timing and slow requests are logged without request bodies, passwords, JWTs, authorization headers, database URLs, or other secrets. Configure `LOG_LEVEL`, `SLOW_REQUEST_THRESHOLD_MS`, and `METRICS_DEFAULT_WINDOW` in `.env`.
 
@@ -119,6 +119,43 @@ The creation request remains backwards compatible and accepts `"dependencies": [
 ## Workflow Execution
 
 Workers continue using PostgreSQL row locks and now claim only pending Jobs whose direct dependencies have all completed successfully. Fan-out and fan-in workflows are supported without process-local graph state. Terminal dependency failure or cancellation propagates through pending downstream chains as `CANCELLED`; successful completion makes downstream Jobs naturally eligible on the next queue poll. Dependency counts for waiting Jobs, blocked Jobs, and edges are included in PostgreSQL-derived metrics.
+
+## Workflows
+
+A workflow is a logical collection and lifecycle boundary for related Jobs. A Job remains the executable unit, and a dependency remains the execution relationship between Jobs. Standalone Jobs remain fully supported.
+
+## Workflow Lifecycle
+
+Workflows start as `PENDING`, become `RUNNING` when a member Job starts, and become `SUCCEEDED` only when every member Job completes. Permanent failure or dependency blocking produces `FAILED`; explicit cancellation produces `CANCELLED`. Empty workflows remain pending.
+
+## Workflow APIs
+
+```text
+POST   /api/v1/workflows
+GET    /api/v1/workflows
+GET    /api/v1/workflows/<workflow_id>
+GET    /api/v1/workflows/<workflow_id>/jobs
+GET    /api/v1/workflows/<workflow_id>/graph
+POST   /api/v1/workflows/<workflow_id>/cancel
+POST   /api/v1/workflows/<workflow_id>/retry
+```
+
+Create Jobs with `workflow_id` to associate them with an existing workflow. Workflow detail includes SQL-derived Job counts and progress; graph output is bounded and includes only Jobs in the requested workflow.
+
+## Bulk Job Operations
+
+Operators and administrators can submit bounded bulk cancellation or retry requests:
+
+```text
+POST /api/v1/jobs/bulk/cancel
+POST /api/v1/jobs/bulk/retry
+```
+
+Each request accepts a unique `job_ids` array limited by `MAX_BULK_JOB_OPERATIONS` and returns per-Job results for partial success. Existing Job cancellation, retry, DLQ, authorization, and rate-limit rules remain authoritative.
+
+## Workflow Dependencies
+
+Workflow membership does not create dependencies automatically. Explicit Job dependencies continue to control execution, including cross-workflow dependencies. A workflow cannot be structurally changed by these APIs after execution begins, and dependency failure propagation can cause the workflow to fail without executing blocked Jobs.
 
 ## Initialize the Schema
 
