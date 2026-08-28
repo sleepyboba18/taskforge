@@ -35,6 +35,11 @@ def initialize_schema() -> None:
     from app import models  # noqa: F401  # Register all models with Base.metadata.
 
     Base.metadata.create_all(get_engine())
+    from app.models import SystemSetting
+    with session_scope() as session:
+        if session.get(SystemSetting, "queue_control") is None:
+            session.add(SystemSetting(key="queue_control", value={"paused": False, "paused_at": None}))
+            session.commit()
     logger.info("Initialized database schema")
 
 

@@ -14,6 +14,7 @@ from app.models import AttemptStatus, Job, JobAttempt, JobDependency, JobStatus,
 from app.services.workflow_service import update_workflow_status
 from app.models import AuditActorType, AuditEntityType, AuditEventType
 from app.services.audit_service import record_event
+from app.services.job_state_machine import transition
 from app.services.admin_service import queue_is_paused
 
 
@@ -30,6 +31,9 @@ class ClaimedJob:
 
 def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
     """Atomically claim the highest-priority eligible job with SKIP LOCKED."""
+    worker = session.scalar(select(Worker).where(Worker.id == worker_id).with_for_update())
+    if worker is None or worker.status != WorkerStatus.IDLE:
+        return None
     if queue_is_paused(session):
         return None
     dependency_parent = aliased(Job)
@@ -68,13 +72,12 @@ def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
         last_heartbeat_at=now,
     )
     previous_status = job.status.value
-    job.status = JobStatus.RUNNING
+    transition(job, JobStatus.RUNNING)
     update_workflow_status(session, job.workflow_id)
     job.worker_id = worker_id
     job.started_at = now
-    worker = session.get(Worker, worker_id)
-    if worker is not None:
-        worker.current_job_id = job.id
+    job.claimed_at = now
+    worker.current_job_id = job.id
     session.add(attempt)
     session.flush()
     record_event(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": previous_status, "to_status": JobStatus.RUNNING.value, "reason": "worker_claimed_job"})

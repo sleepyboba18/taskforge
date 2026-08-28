@@ -77,10 +77,13 @@ def retry_dead_letter(dead_letter_id: uuid.UUID) -> Job:
     """Atomically remove the active DLQ record and requeue its original Job."""
     try:
         with session_scope() as session:
+            record_id = session.scalar(select(DeadLetterJob.job_id).where(DeadLetterJob.id == dead_letter_id))
+            if record_id is None:
+                raise DeadLetterNotFoundError
+            job = session.scalar(select(Job).where(Job.id == record_id).with_for_update())
             record = get_dead_letter_for_update(session, dead_letter_id)
             if record is None:
                 raise DeadLetterNotFoundError
-            job = session.scalar(select(Job).where(Job.id == record.job_id).with_for_update())
             if job is None:
                 raise DeadLetterConflictError
             if job.status != JobStatus.FAILED:
@@ -114,11 +117,11 @@ def retry_dead_letter(dead_letter_id: uuid.UUID) -> Job:
 def requeue_job_by_id(job_id: uuid.UUID, *, reason: str | None = None) -> Job:
     try:
         with session_scope() as session:
-            record = session.scalar(select(DeadLetterJob).where(DeadLetterJob.job_id == job_id).with_for_update())
-            if record is None:
-                raise DeadLetterNotFoundError
             job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
-            if job is None or job.status != JobStatus.FAILED:
+            if job is None:
+                raise DeadLetterNotFoundError
+            record = session.scalar(select(DeadLetterJob).where(DeadLetterJob.job_id == job_id).with_for_update())
+            if record is None or job.status != JobStatus.FAILED:
                 raise DeadLetterConflictError
             session.delete(record)
             job.status = JobStatus.PENDING

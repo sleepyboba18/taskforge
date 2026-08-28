@@ -58,19 +58,16 @@ def recover_stale_workers(*, stale_timeout: float, policy: RetryPolicy) -> list[
                 worker.status = WorkerStatus.STALE
                 record_event(session, event_type=AuditEventType.WORKER_MARKED_STALE, entity_type=AuditEntityType.WORKER, entity_id=worker.id, actor_type=AuditActorType.SYSTEM, worker_id=worker.id, details={"reason": "heartbeat_timeout"})
                 worker.updated_at = datetime.now(timezone.utc)
-                attempts = list(
-                    session.scalars(
-                        select(JobAttempt)
-                        .where(
-                            JobAttempt.worker_id == worker.id,
-                            JobAttempt.status == AttemptStatus.RUNNING,
-                        )
-                        .with_for_update(skip_locked=True)
-                    )
-                )
+                attempts = list(session.scalars(select(JobAttempt).where(
+                    JobAttempt.worker_id == worker.id,
+                    JobAttempt.status == AttemptStatus.RUNNING,
+                )))
                 for attempt in attempts:
                     job = session.scalar(select(Job).where(Job.id == attempt.job_id).with_for_update())
                     if job is None or job.status != JobStatus.RUNNING or job.worker_id != worker.id:
+                        continue
+                    attempt = session.scalar(select(JobAttempt).where(JobAttempt.id == attempt.id).with_for_update())
+                    if attempt is None or attempt.status != AttemptStatus.RUNNING:
                         continue
                     now = datetime.now(timezone.utc)
                     attempt.status = AttemptStatus.FAILED

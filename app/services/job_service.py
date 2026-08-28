@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database.repositories.job_repository import (
@@ -20,6 +21,7 @@ from app.models import DeadLetterJob, Job, JobStatus, Workflow
 from app.services.dependency_service import add_edges, propagate_dependency_failure
 from app.services.audit_service import record_current
 from app.models import AuditEntityType, AuditEventType
+from app.services.job_state_machine import transition
 from app.sockets import publish_event
 
 logger = logging.getLogger("taskforge.jobs")
@@ -154,7 +156,7 @@ def cancel_job(job_id: uuid.UUID, *, max_dependency_propagation_depth: int = 50,
             if job.status not in CANCELLABLE_STATUSES:
                 raise JobStateConflictError(job.status)
             previous_status = job.status.value
-            job.status = JobStatus.CANCELLED
+            transition(job, JobStatus.CANCELLED)
             record_current(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": previous_status, "to_status": JobStatus.CANCELLED.value, "reason": "job_cancelled"})
             record_current(session, event_type=AuditEventType.JOB_CANCELLED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"previous_status": previous_status, "reason": reason or "job_cancelled"})
             propagate_dependency_failure(session, job.id, max_depth=max_dependency_propagation_depth)
@@ -185,7 +187,7 @@ def bulk_cancel_jobs(job_ids: list[uuid.UUID], *, max_dependency_propagation_dep
                     results.append({"job_id": str(job_id), "status": "not_cancellable", "reason": f"Job is {job.status.value}."})
                     continue
                 previous_status = job.status.value
-                job.status = JobStatus.CANCELLED
+                transition(job, JobStatus.CANCELLED)
                 record_current(session, event_type=AuditEventType.JOB_CANCELLED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"previous_status": previous_status, "source": "bulk"})
                 job.completed_at = datetime.now(timezone.utc)
                 propagate_dependency_failure(session, job.id, max_depth=max_dependency_propagation_depth)
@@ -214,7 +216,9 @@ def bulk_retry_jobs(job_ids: list[uuid.UUID]) -> list[dict[str, Any]]:
                 job.last_error = None
                 job.next_retry_at = None
                 record_current(session, event_type=AuditEventType.JOB_RETRIED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"retry_source": "USER"})
-                session.query(DeadLetterJob).filter(DeadLetterJob.job_id == job.id).delete(synchronize_session=False)
+                dead_letter = session.scalar(select(DeadLetterJob).where(DeadLetterJob.job_id == job.id).with_for_update())
+                if dead_letter is not None:
+                    session.delete(dead_letter)
                 results.append({"job_id": str(job_id), "status": "retrying"})
             record_current(session, event_type=AuditEventType.BULK_JOB_RETRY, entity_type=AuditEntityType.SYSTEM, details={"requested_count": len(job_ids), "successful_count": sum(result["status"] == "retrying" for result in results), "failed_count": sum(result["status"] != "retrying" for result in results)})
             session.commit()

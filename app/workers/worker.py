@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import select
 
 from app.database.repositories.job_queue import ClaimedJob, claim_next_job
 from app.database.session import dispose_database, initialize_database, session_scope
@@ -21,6 +22,7 @@ from app.services.retry_service import RetryDatabaseError, handle_task_failure
 from app.services.workflow_service import update_workflow_status
 from app.models import AuditActorType, AuditEntityType, AuditEventType
 from app.services.audit_service import record_event
+from app.services.job_state_machine import transition
 from app.sockets import publish_event
 from app.workers.registry import heartbeat_worker, register_worker, set_worker_status
 
@@ -156,19 +158,21 @@ def _complete_job(claimed: ClaimedJob) -> None:
     now = datetime.now(timezone.utc)
     try:
         with session_scope() as session:
-            job = session.get(Job, claimed.job_id)
-            attempt = session.get(JobAttempt, claimed.attempt_id)
-            if job is None or attempt is None:
+            worker = session.scalar(select(Worker).where(Worker.id == claimed.worker_id).with_for_update())
+            job = session.scalar(select(Job).where(Job.id == claimed.job_id).with_for_update())
+            attempt = session.scalar(select(JobAttempt).where(JobAttempt.id == claimed.attempt_id).with_for_update())
+            if worker is None or job is None or attempt is None:
                 raise RuntimeError("Claimed job or attempt no longer exists.")
-            job.status = JobStatus.COMPLETED
+            if job.status != JobStatus.RUNNING or job.worker_id != claimed.worker_id or attempt.status != AttemptStatus.RUNNING or attempt.worker_id != claimed.worker_id:
+                logger.warning("Ignoring stale completion for job %s", claimed.job_id)
+                return
+            transition(job, JobStatus.COMPLETED)
             job.completed_at = now
             job.updated_at = now
             attempt.status = AttemptStatus.COMPLETED
             attempt.finished_at = now
             attempt.last_heartbeat_at = now
-            worker = session.get(Worker, claimed.worker_id)
-            if worker is not None:
-                worker.current_job_id = None
+            worker.current_job_id = None
             set_worker_status(session, claimed.worker_id, WorkerStatus.IDLE)
             update_workflow_status(session, job.workflow_id)
             record_event(session, event_type=AuditEventType.JOB_STATE_CHANGED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=claimed.worker_id, worker_id=claimed.worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"from_status": JobStatus.RUNNING.value, "to_status": JobStatus.COMPLETED.value, "reason": "attempt_succeeded"})

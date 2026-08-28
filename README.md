@@ -265,6 +265,30 @@ Scheduler polling remains owned by the existing scheduler processes. No second s
 
 Administrative status is available at `GET /api/v1/admin/status` and reuses monitoring data. State changes use short PostgreSQL transactions, row locks where needed, existing request IDs, and audit records. Secrets, tokens, credentials, and Job payloads are never accepted as audit metadata or returned by these APIs.
 
+## Concurrency Model
+
+PostgreSQL is TaskForge's authoritative coordination layer. Independent worker processes use row-level locks and `FOR UPDATE SKIP LOCKED`; Python globals, files, and local locks are never used for distributed state.
+
+## PostgreSQL Coordination
+
+Queue pause state is persisted in the `system_settings` table. Worker admission locks the queue-control row and the worker row before selecting work, while the Job row lock prevents two workers from claiming the same Job. JobAttempt uniqueness remains enforced by `(job_id, attempt_number)`.
+
+## Worker Job Claiming
+
+Claiming follows a short transaction: lock an idle Worker, check operational state, select an eligible Job with `SKIP LOCKED`, create its JobAttempt, set `RUNNING`, record audit events, and commit. User task execution happens after commit. A `claimed_at` timestamp records the successful claim.
+
+## Transaction Boundaries
+
+Completion, failure, recovery, retries, cancellation, and DLQ requeue use short transactions and deterministic lock ordering. Locks are not held during task execution, retry backoff, scheduler sleeps, or Socket.IO emission. Late worker completion is ignored when the Job or Attempt is no longer owned and running.
+
+## Concurrency Guarantees
+
+The database prevents concurrent workers from receiving the same committed claim, and terminal Job states cannot transition back to execution. Administrative and DLQ operations lock their resources before validating and changing state. Monitoring remains read-only and may reflect a rapidly changing database snapshot.
+
+## Recovery and Race Conditions
+
+Recovery re-checks Worker, Job, and Attempt state after locking. A worker heartbeat or another transition that wins the database ordering prevents stale recovery from overwriting it. Task execution is generally at-least-once around process/database failures; handlers that produce external effects should be idempotent.
+
 ## Initialize the Schema
 
 After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:

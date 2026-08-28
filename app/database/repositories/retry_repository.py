@@ -15,6 +15,7 @@ from app.services.retry_policy import RetryPolicy
 from app.workers.registry import set_worker_status
 from app.models import AuditActorType, AuditEntityType, AuditEventType
 from app.services.audit_service import record_event
+from app.services.job_state_machine import transition
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,9 +44,10 @@ def record_failure(
     policy: RetryPolicy,
 ) -> RetryOutcome:
     """Atomically fail the attempt and schedule or finalize its job."""
+    worker = session.scalar(select(Worker).where(Worker.id == worker_id).with_for_update())
     job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
-    attempt = session.get(JobAttempt, attempt_id)
-    if job is None or attempt is None:
+    attempt = session.scalar(select(JobAttempt).where(JobAttempt.id == attempt_id).with_for_update())
+    if worker is None or job is None or attempt is None:
         raise RuntimeError("Claimed job or attempt no longer exists.")
     if job.status != JobStatus.RUNNING or attempt.status != AttemptStatus.RUNNING:
         raise RuntimeError("Job is not in a retryable running state.")
@@ -60,12 +62,12 @@ def record_failure(
     job.updated_at = now
     previous_status = JobStatus.RUNNING
     if decision.should_retry:
-        job.status = JobStatus.RETRYING
+        transition(job, JobStatus.RETRYING)
         job.retry_count += 1
         job.next_retry_at = now + timedelta(seconds=decision.delay_seconds or 0)
         next_retry_at = job.next_retry_at
     else:
-        job.status = JobStatus.FAILED
+        transition(job, JobStatus.FAILED)
         job.completed_at = now
         job.next_retry_at = None
         next_retry_at = None
@@ -85,9 +87,7 @@ def record_failure(
         record_event(session, event_type=AuditEventType.JOB_RETRIED, entity_type=AuditEntityType.JOB, entity_id=job.id, actor_type=AuditActorType.WORKER, actor_id=worker_id, worker_id=worker_id, job_id=job.id, workflow_id=job.workflow_id, details={"retry_source": "AUTOMATIC", "retry_number": job.retry_count})
         dead_letter_id = None
     set_worker_status(session, worker_id, WorkerStatus.IDLE)
-    worker = session.get(Worker, worker_id)
-    if worker is not None:
-        worker.current_job_id = None
+    worker.current_job_id = None
     return RetryOutcome(
         job_id=job.id,
         attempt_id=attempt.id,
