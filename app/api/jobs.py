@@ -12,6 +12,7 @@ from flask import Blueprint, current_app, g, has_app_context, jsonify, request
 from app.api.serializers import job_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED, OPERATORS
+from app.lifecycle import get_lifecycle
 from app.rate_limit import rate_limit
 from app.models import JobStatus
 from app.services.job_service import (
@@ -81,6 +82,9 @@ def _bulk_action(action, operation):
 @rate_limit("write")
 def submit_job():
     """Validate and persist a new job."""
+    if get_lifecycle().is_stopping:
+        return _error("SERVICE_UNAVAILABLE", "Service is shutting down.", status=503)
+    
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return _error("VALIDATION_ERROR", "Request body must be a JSON object.", status=400)

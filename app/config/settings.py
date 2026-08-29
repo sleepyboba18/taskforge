@@ -27,6 +27,7 @@ class Settings:
     worker_count: int
     worker_poll_interval: float
     worker_shutdown_timeout: int
+    shutdown_timeout_seconds: int
     retry_base_delay: float
     retry_max_delay: float
     retry_poll_interval: float
@@ -100,6 +101,9 @@ class Settings:
             worker_shutdown_timeout=_parse_bounded_int(
                 "WORKER_SHUTDOWN_TIMEOUT", default=30, maximum=300
             ),
+            shutdown_timeout_seconds=_parse_bounded_int(
+                "SHUTDOWN_TIMEOUT_SECONDS", default=60, maximum=600
+            ),
             retry_base_delay=_parse_non_negative_float("RETRY_BASE_DELAY", default=5.0),
             retry_max_delay=_parse_non_negative_float("RETRY_MAX_DELAY", default=3600.0),
             retry_poll_interval=_parse_positive_float("RETRY_POLL_INTERVAL", default=1.0),
@@ -157,6 +161,8 @@ class Settings:
             raise ConfigurationError("MISFIRE_POLICY currently supports only SKIP.")
         if settings.worker_stale_timeout <= settings.worker_heartbeat_interval:
             raise ConfigurationError("WORKER_STALE_TIMEOUT must be greater than WORKER_HEARTBEAT_INTERVAL.")
+        if settings.shutdown_timeout_seconds < settings.worker_shutdown_timeout:
+            raise ConfigurationError("SHUTDOWN_TIMEOUT_SECONDS must be >= WORKER_SHUTDOWN_TIMEOUT.")
         if not settings.jwt_secret_key:
             raise ConfigurationError("JWT_SECRET_KEY is required and must not be empty.")
         bootstrap_values = (

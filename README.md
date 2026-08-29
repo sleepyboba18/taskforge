@@ -37,7 +37,74 @@ python main.py
 
 The service listens on the configured host and port. `GET /health` returns the service status. Database connectivity can be checked through the reusable `check_database_connection` function; this foundation does not create tables automatically.
 
-## Authentication and Authorization
+## Process Lifecycle
+
+TaskForge manages a complete application lifecycle from startup through graceful shutdown:
+
+### Startup
+
+The application follows a deterministic startup sequence:
+1. Load and validate environment configuration
+2. Initialize logging
+3. Initialize Flask application and database connection
+4. Initialize worker pool
+5. Initialize scheduler processes
+6. Transition to RUNNING state
+
+Startup errors are logged and the process exits with status 1. Partial initialization is cleaned up automatically.
+
+### Graceful Shutdown
+
+The application handles `SIGINT` (Ctrl+C) and `SIGTERM` signals by initiating graceful shutdown:
+
+1. Transition to STOPPING state
+2. Broadcast `server:shutdown` to Socket.IO clients
+3. Stop accepting new job submissions (return HTTP 503)
+4. Readiness probe becomes unavailable (return HTTP 503)
+5. Scheduler stops creating new jobs
+6. Workers drain current work without claiming new jobs
+7. Wait up to `SHUTDOWN_TIMEOUT_SECONDS` for workers to finish
+8. Force-terminate any remaining workers
+9. Dispose SQLAlchemy database resources
+10. Emit final metrics
+11. Transition to STOPPED state and exit
+
+### Shutdown Configuration
+
+Configure graceful shutdown behavior in `.env`:
+
+```text
+SHUTDOWN_TIMEOUT_SECONDS=60
+WORKER_SHUTDOWN_TIMEOUT=30
+```
+
+- `SHUTDOWN_TIMEOUT_SECONDS`: Total time allocated for graceful shutdown (default 60s, max 600s)
+- `WORKER_SHUTDOWN_TIMEOUT`: Time to wait for individual workers to exit gracefully (default 30s, max 300s)
+
+Workers that exceed the shutdown timeout are force-terminated. The total shutdown timeout must be greater than or equal to the worker shutdown timeout.
+
+### Shutdown Behavior
+
+During shutdown:
+
+- New HTTP requests that create or schedule work receive `503 Service Unavailable`
+- Read-only requests continue briefly before the HTTP server closes
+- Connected Socket.IO clients receive a `server:shutdown` notification
+- Active jobs are allowed to complete; jobs are not cancelled
+- Long-running jobs that exceed the timeout remain in an appropriate state for recovery
+- Workers exit cleanly, updating their status to STOPPED
+- Database connections are properly disposed
+
+Repeated shutdown signals (e.g., multiple Ctrl+C presses) are safe and idempotent.
+
+### Lifecycle Monitoring
+
+Query `GET /ready` for public readiness: returns `200 OK` only when the application is RUNNING and the database is reachable. Returns `503` during startup, shutdown, or failure.
+
+Query `GET /health` for public liveness: returns `200 OK` as long as the process is alive.
+
+Authenticated operators can query `GET /api/v1/health` for detailed lifecycle and component state.
+
 
 User accounts are stored in PostgreSQL with unique usernames and emails. Passwords are stored only as Werkzeug password hashes. Login returns a short-lived JWT access token:
 

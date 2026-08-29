@@ -5,9 +5,10 @@ import logging
 from app import create_app, socketio
 from app.config.settings import ConfigurationError, Settings
 from app.lifecycle import get_lifecycle
+from app.sockets import broadcast_server_shutdown
 from app.workers import WorkerManager
 from app.workers.signals import install_shutdown_handlers
-from app.database.session import initialize_schema
+from app.database.session import initialize_schema, dispose_database
 from app.services.user_service import bootstrap_admin, UserServiceError
 
 logger = logging.getLogger("taskforge")
@@ -50,7 +51,9 @@ def main() -> None:
         logger.info("Shutdown requested")
     finally:
         lifecycle.mark_stopping()
+        broadcast_server_shutdown()
         worker_manager.stop()
+        dispose_database()
         lifecycle.mark_stopped()
 
 if __name__ == "__main__":

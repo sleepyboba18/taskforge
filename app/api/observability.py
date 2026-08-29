@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, current_app, request
 
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED
+from app.lifecycle import get_lifecycle
 from app.rate_limit import rate_limit
 from app.database.session import check_database_connection
 from app.services.observability_service import (
@@ -19,7 +20,9 @@ observability_bp = Blueprint("observability", __name__)
 
 @observability_bp.get("/ready")
 def readiness():
-    """Report whether the application can reach PostgreSQL."""
+    """Report whether the application can reach PostgreSQL and is not shutting down."""
+    if get_lifecycle().is_stopping:
+        return jsonify({"status": "not_ready"}), 503
     try:
         check_database_connection()
     except Exception:
