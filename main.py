@@ -1,18 +1,16 @@
-"""TaskForge executable entry point."""
-
 from __future__ import annotations
 
 import logging
 
 from app import create_app, socketio
 from app.config.settings import ConfigurationError, Settings
+from app.lifecycle import get_lifecycle
 from app.workers import WorkerManager
 from app.workers.signals import install_shutdown_handlers
 from app.database.session import initialize_schema
 from app.services.user_service import bootstrap_admin, UserServiceError
 
 logger = logging.getLogger("taskforge")
-
 
 def main() -> None:
     try:
@@ -36,6 +34,7 @@ def main() -> None:
             raise SystemExit(1) from exc
 
     worker_manager = WorkerManager(settings)
+    lifecycle = get_lifecycle()
     install_shutdown_handlers(worker_manager.stop)
     worker_manager.start()
     logger.info("Starting %s on %s:%s", settings.app_name, settings.host, settings.port)
@@ -50,8 +49,9 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Shutdown requested")
     finally:
+        lifecycle.mark_stopping()
         worker_manager.stop()
-
+        lifecycle.mark_stopped()
 
 if __name__ == "__main__":
     main()

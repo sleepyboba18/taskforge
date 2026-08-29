@@ -16,6 +16,7 @@ from werkzeug.exceptions import HTTPException
 from app.api import api_bp
 from app.config.settings import ConfigurationError, Settings
 from app.database.session import initialize_database
+from app.lifecycle import get_lifecycle
 from app.sockets import socketio
 from app.services.monitoring_service import record_api_request
 
@@ -72,6 +73,7 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     app.register_blueprint(api_bp)
     _register_error_handlers(app)
+    get_lifecycle().mark_running()
 
     @app.after_request
     def add_security_headers(response):
