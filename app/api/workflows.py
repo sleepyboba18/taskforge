@@ -7,6 +7,7 @@ import uuid
 
 from flask import Blueprint, current_app, g, jsonify, request
 
+from app.api.pagination import validate_query_parameters
 from app.api.serializers import job_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED, OPERATORS
@@ -77,6 +78,8 @@ def create_workflow_endpoint():
 @require_roles(*AUTHENTICATED)
 @rate_limit("read")
 def list_workflows_endpoint():
+    if validate_query_parameters(request.args, {"page", "per_page", "status"}):
+        return _error("VALIDATION_ERROR", "Unsupported or repeated query parameters.", 400)
     page_data = _page()
     if page_data is None:
         return _error("VALIDATION_ERROR", "Invalid pagination.", 400)
@@ -111,6 +114,8 @@ def workflow_detail_endpoint(workflow_id: str):
 @require_roles(*AUTHENTICATED)
 @rate_limit("read")
 def workflow_jobs_endpoint(workflow_id: str):
+    if validate_query_parameters(request.args, {"page", "per_page"}):
+        return _error("VALIDATION_ERROR", "Unsupported or repeated query parameters.", 400)
     parsed, page_data = _uuid(workflow_id), _page()
     if parsed is None or page_data is None:
         return _error("VALIDATION_ERROR", "Invalid workflow ID or pagination.", 400)

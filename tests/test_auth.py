@@ -48,6 +48,10 @@ class AuthRouteTests(unittest.TestCase):
     def test_me_requires_authentication(self) -> None:
         response = self.client.get("/api/v1/auth/me")
         self.assertEqual(401, response.status_code)
+        body = response.get_json()
+        self.assertEqual("authentication_required", body["error"]["code"])
+        self.assertTrue(body["error"]["message"])
+        self.assertEqual(response.headers["X-Request-ID"], body["request_id"])
 
     def test_me_does_not_return_hash(self) -> None:
         with patch("app.auth.decorators.authenticate_request", return_value=(self.user, None)):
@@ -151,6 +155,39 @@ class AuthorizationRouteTests(unittest.TestCase):
             response = self.client.post("/api/v1/users", json={"username": "new", "email": "new@example.com", "password": "password1", "role": "OPERATOR"})
         self.assertEqual(201, response.status_code)
         self.assertNotIn("password_hash", response.get_json()["data"])
+
+    def test_admin_user_update_rejects_invalid_email_and_empty_patch(self) -> None:
+        admin = User(id=uuid.uuid4(), username="admin", email="admin@example.com", password_hash="hash", role=UserRole.ADMIN, is_active=True)
+        user_id = uuid.uuid4()
+        for body in ({}, {"email": ["not", "an", "email"]}, {"email": "invalid"}):
+            with self.subTest(body=body), patch(
+                "app.auth.decorators.authenticate_request", return_value=(admin, None)
+            ), patch("app.api.users.update_user") as update_user:
+                response = self.client.patch(f"/api/v1/users/{user_id}", json=body)
+            self.assertEqual(400, response.status_code)
+            update_user.assert_not_called()
+
+    def test_admin_user_list_is_paginated(self) -> None:
+        admin = User(id=uuid.uuid4(), username="admin", email="admin@example.com", password_hash="hash", role=UserRole.ADMIN, is_active=True)
+        with patch("app.auth.decorators.authenticate_request", return_value=(admin, None)), patch(
+            "app.api.users.list_users", return_value=([], 35)
+        ) as list_users:
+            response = self.client.get("/api/v1/users?page=2&per_page=10")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"page": 2, "per_page": 10, "total": 35, "pages": 4}, response.get_json()["pagination"])
+        list_users.assert_called_once_with(page=2, per_page=10)
+
+    def test_admin_user_list_rejects_oversized_page(self) -> None:
+        admin = User(id=uuid.uuid4(), username="admin", email="admin@example.com", password_hash="hash", role=UserRole.ADMIN, is_active=True)
+        with patch("app.auth.decorators.authenticate_request", return_value=(admin, None)), patch(
+            "app.api.users.list_users"
+        ) as list_users:
+            response = self.client.get("/api/v1/users?per_page=101")
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual("validation_error", response.get_json()["error"]["code"])
+        list_users.assert_not_called()
 
     def test_viewer_cannot_create_user(self) -> None:
         viewer = User(id=uuid.uuid4(), username="viewer", email="viewer@example.com", password_hash="hash", role=UserRole.VIEWER, is_active=True)

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
+from app.api.pagination import validate_query_parameters
 from app.auth.decorators import require_roles
 from app.auth.permissions import OPERATORS
 from app.models import AuditEntityType, AuditEventType
@@ -65,6 +66,12 @@ def _parse_filters():
 @require_roles(*OPERATORS)
 @rate_limit("admin")
 def audit_events_endpoint():
+    allowed = {
+        "page", "per_page", "event_type", "entity_type", "entity_id", "job_id",
+        "workflow_id", "actor_id", "worker_id", "created_after", "created_before",
+    }
+    if validate_query_parameters(request.args, allowed):
+        return _error("VALIDATION_ERROR", "Unsupported or repeated query parameters.", 400)
     page_data = _page()
     filters = _parse_filters()
     if page_data is None or filters is None:
@@ -98,6 +105,8 @@ def history_endpoint(*, field: str, value: str):
         parsed = uuid.UUID(value)
     except ValueError:
         return _error("RESOURCE_NOT_FOUND", "Resource not found.", 404)
+    if validate_query_parameters(request.args, {"page", "per_page"}):
+        return _error("VALIDATION_ERROR", "Unsupported or repeated query parameters.", 400)
     page_data = _page()
     if page_data is None:
         return _error("VALIDATION_ERROR", "Invalid pagination.", 400)

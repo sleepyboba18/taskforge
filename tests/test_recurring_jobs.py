@@ -77,6 +77,14 @@ class RecurringJobRouteTests(unittest.TestCase):
         self.assertEqual(400, response.status_code)
         self.assertEqual("VALIDATION_ERROR", response.get_json()["error"]["code"])
 
+    def test_recurring_job_list_is_paginated(self) -> None:
+        with patch("app.api.recurring_jobs.list_recurring_jobs", return_value=([], 41)) as list_jobs:
+            response = self.client.get("/api/v1/recurring-jobs?enabled=true&page=3&per_page=10")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"page": 3, "per_page": 10, "total": 41, "pages": 5}, response.get_json()["pagination"])
+        list_jobs.assert_called_once_with(enabled=True, page=3, per_page=10)
+
     def test_malformed_id_is_rejected(self) -> None:
         response = self.client.get("/api/v1/recurring-jobs/not-a-uuid")
         self.assertEqual(400, response.status_code)

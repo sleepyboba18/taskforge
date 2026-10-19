@@ -19,16 +19,27 @@ class WorkerDatabaseError(RuntimeError):
     """Raised when worker health data cannot be read."""
 
 
-def list_workers(*, status: WorkerStatus | None = None) -> list[Worker]:
+def list_workers(
+    *, status: WorkerStatus | None = None, page: int = 1, per_page: int = 20
+) -> tuple[list[Worker], int]:
     try:
         with session_scope() as session:
-            statement = select(Worker).order_by(Worker.created_at.desc())
+            filters = []
             if status is not None:
-                statement = statement.where(Worker.status == status)
-            workers = list(session.scalars(statement))
+                filters.append(Worker.status == status)
+            total = session.scalar(select(func.count()).select_from(Worker).where(*filters)) or 0
+            workers = list(
+                session.scalars(
+                    select(Worker)
+                    .where(*filters)
+                    .order_by(Worker.created_at.desc(), Worker.id.asc())
+                    .offset((page - 1) * per_page)
+                    .limit(per_page)
+                )
+            )
             for worker in workers:
                 session.expunge(worker)
-            return workers
+            return workers, total
     except SQLAlchemyError as exc:
         logger.exception("Database error listing workers")
         raise WorkerDatabaseError from exc

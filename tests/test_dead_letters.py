@@ -33,6 +33,13 @@ class DeadLetterRouteTests(unittest.TestCase):
         self.assertEqual(400, response.status_code)
         self.assertEqual("VALIDATION_ERROR", response.get_json()["error"]["code"])
 
+    def test_list_rejects_unknown_query_parameters(self) -> None:
+        with patch("app.api.dead_letters.list_dead_letters") as list_dead_letters:
+            response = self.client.get("/api/v1/dead-letters?sort=payload")
+
+        self.assertEqual(400, response.status_code)
+        list_dead_letters.assert_not_called()
+
     def test_malformed_id_is_rejected(self) -> None:
         response = self.client.get("/api/v1/dead-letters/not-a-uuid")
         self.assertEqual(400, response.status_code)

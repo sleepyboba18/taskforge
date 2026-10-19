@@ -377,6 +377,93 @@ Versioned JSON endpoints live under `/api/v1`. Routes validate input, apply the 
 
 Protected endpoints require the existing Bearer JWT and role checks. Invalid credentials return JSON errors without revealing resource existence or exposing tokens. Administrative and monitoring APIs require elevated roles.
 
+## API Workflow
+
+The following Python example uses the actual JSON API. Install `requests` separately only if you want to run this example; it is not a TaskForge dependency. Replace the placeholders with a test account and returned resource IDs.
+
+```python
+import requests
+
+base_url = "http://127.0.0.1:5000"
+login = requests.post(
+	f"{base_url}/api/v1/auth/login",
+	json={"username": "<operator-username>", "password": "<test-password>"},
+	timeout=10,
+)
+login.raise_for_status()
+token = login.json()["data"]["access_token"]
+headers = {"Authorization": f"Bearer {token}"}
+
+created = requests.post(
+	f"{base_url}/api/v1/jobs",
+	headers=headers,
+	json={
+		"name": "example-echo",
+		"task_type": "echo",
+		"payload": {"message": "hello"},
+		"priority": 5,
+		"max_retries": 3,
+	},
+	timeout=10,
+)
+created.raise_for_status()
+job_id = created.json()["data"]["id"]
+
+job = requests.get(f"{base_url}/api/v1/jobs/{job_id}", headers=headers, timeout=10)
+job.raise_for_status()
+page = requests.get(
+	f"{base_url}/api/v1/jobs?page=1&per_page=20&status=PENDING&sort=-created_at",
+	headers=headers,
+	timeout=10,
+)
+page.raise_for_status()
+print(page.json()["pagination"])
+
+attempts = requests.get(
+	f"{base_url}/api/v1/jobs/{job_id}/attempts?page=1&per_page=20",
+	headers=headers,
+	timeout=10,
+)
+attempts.raise_for_status()
+workers = requests.get(
+	f"{base_url}/api/v1/workers?page=1&per_page=20&status=IDLE",
+	headers=headers,
+	timeout=10,
+)
+workers.raise_for_status()
+
+# Cancellation applies to pending, scheduled, and retrying Jobs.
+cancelled = requests.post(
+	f"{base_url}/api/v1/jobs/{job_id}/cancel", headers=headers, timeout=10
+)
+if cancelled.status_code not in (200, 409):
+	cancelled.raise_for_status()
+
+# Retry a different failed Job; retrying a cancelled Job is a conflict.
+failed_job_id = "<failed-job-id>"
+retry = requests.post(
+	f"{base_url}/api/v1/admin/jobs/{failed_job_id}/retry", headers=headers, timeout=10
+)
+if retry.status_code not in (200, 409):
+	retry.raise_for_status()
+
+# One-time scheduled Job: scheduled_at must be timezone-aware ISO-8601.
+scheduled = requests.post(
+	f"{base_url}/api/v1/jobs",
+	headers=headers,
+	json={
+		"name": "later-echo",
+		"task_type": "echo",
+		"payload": {"message": "later"},
+		"scheduled_at": "2030-01-01T12:00:00Z",
+	},
+	timeout=10,
+)
+scheduled.raise_for_status()
+```
+
+Collections retain their existing `data` arrays and include `pagination` metadata (`page`, `per_page`, `total`, and `pages`). Job filters are `status`, `task_type`, and `priority`; sort values are allowlisted (`created_at`, `priority`, `status`, optionally prefixed with `-`). Page size is limited to 100. Errors use `success: false`, an `error.code`, a safe `error.message`, and `request_id`; inspect the HTTP status and response JSON. Job creation has no idempotency-key support, so do not automatically repeat a timed-out create request without first checking whether the Job was persisted.
+
 ## Testing
 
 Install development test dependencies and run the full suite:

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database.repositories.recurring_repository import GeneratedExecution, generate_due_execution
@@ -62,16 +62,27 @@ def get_recurring_job(recurring_job_id: uuid.UUID) -> RecurringJob:
         raise RecurringJobDatabaseError from exc
 
 
-def list_recurring_jobs(*, enabled: bool | None = None) -> list[RecurringJob]:
+def list_recurring_jobs(
+    *, enabled: bool | None = None, page: int = 1, per_page: int = 20
+) -> tuple[list[RecurringJob], int]:
     try:
         with session_scope() as session:
-            statement = select(RecurringJob).order_by(RecurringJob.created_at.desc())
+            filters = []
             if enabled is not None:
-                statement = statement.where(RecurringJob.enabled == enabled)
-            jobs = list(session.scalars(statement))
+                filters.append(RecurringJob.enabled == enabled)
+            total = session.scalar(select(func.count()).select_from(RecurringJob).where(*filters)) or 0
+            jobs = list(
+                session.scalars(
+                    select(RecurringJob)
+                    .where(*filters)
+                    .order_by(RecurringJob.created_at.desc(), RecurringJob.id.asc())
+                    .offset((page - 1) * per_page)
+                    .limit(per_page)
+                )
+            )
             for job in jobs:
                 session.expunge(job)
-            return jobs
+            return jobs, total
     except SQLAlchemyError as exc:
         raise RecurringJobDatabaseError from exc
 

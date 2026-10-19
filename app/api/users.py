@@ -7,6 +7,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from app.api.pagination import pagination_metadata, parse_pagination, validate_query_parameters
 from app.auth.decorators import require_role
 from app.auth.password import validate_password
 from app.rate_limit import rate_limit
@@ -28,11 +29,22 @@ users_bp = Blueprint("users", __name__, url_prefix="/api/v1/users")
 @require_role(UserRole.ADMIN)
 @rate_limit("admin")
 def list_users_endpoint():
+    if validate_query_parameters(request.args, {"page", "per_page"}):
+        return _error("validation_error", 400, {"query": "Unsupported query parameters."})
+    page, per_page, errors = parse_pagination(request.args)
+    if errors:
+        return _error("validation_error", 400, errors)
     try:
-        users = list_users()
+        users, total = list_users(page=page, per_page=per_page)
     except UserDatabaseError:
         return _error("database_error", 500)
-    return jsonify({"success": True, "data": [_user_dict(user) for user in users]})
+    return jsonify(
+        {
+            "success": True,
+            "data": [_user_dict(user) for user in users],
+            "pagination": pagination_metadata(page, per_page, total),
+        }
+    )
 
 
 @users_bp.get("/<user_id>")
@@ -76,8 +88,20 @@ def update_user_endpoint(user_id: str):
     except (ValueError, AttributeError):
         return _error("validation_error", 400)
     body = request.get_json(silent=True)
-    if not isinstance(body, dict) or not set(body).issubset({"email", "role", "is_active"}):
+    if (
+        not isinstance(body, dict)
+        or not body
+        or not set(body).issubset({"email", "role", "is_active"})
+    ):
         return _error("validation_error", 400)
+    email = body.get("email")
+    if "email" in body and (
+        not isinstance(email, str)
+        or not email.strip()
+        or len(email.strip()) > 320
+        or "@" not in email
+    ):
+        return _error("validation_error", 400, {"email": "A valid email is required."})
     role = None
     if "role" in body:
         try:
@@ -87,7 +111,12 @@ def update_user_endpoint(user_id: str):
     if "is_active" in body and not isinstance(body["is_active"], bool):
         return _error("validation_error", 400)
     try:
-        user = update_user(parsed_id, email=body.get("email"), role=role, is_active=body.get("is_active"))
+        user = update_user(
+            parsed_id,
+            email=email.strip().lower() if isinstance(email, str) else None,
+            role=role,
+            is_active=body.get("is_active"),
+        )
     except UserNotFoundError:
         return _error("user_not_found", 404)
     except UserAlreadyExistsError:

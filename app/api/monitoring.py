@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flask import Blueprint, current_app, jsonify, request
 
+from app.api.pagination import validate_query_parameters
 from app.auth.decorators import require_roles
 from app.auth.permissions import OPERATORS
 from app.rate_limit import rate_limit
@@ -17,6 +18,8 @@ def _error(code: str, message: str, status: int):
 
 
 def _snapshot():
+    if validate_query_parameters(request.args, {"window"}):
+        return _error("VALIDATION_ERROR", "Unsupported or repeated query parameters.", 400)
     try:
         return get_monitoring_snapshot(
             window=validate_window(request.args.get("window")),

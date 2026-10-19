@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, current_app, request
 
+from app.api.pagination import validate_query_parameters
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED
 from app.lifecycle import get_lifecycle
@@ -42,6 +43,16 @@ def detailed_health_endpoint():
 @require_roles(*AUTHENTICATED)
 @rate_limit("read")
 def metrics_endpoint():
+    if validate_query_parameters(request.args, {"window"}):
+        return jsonify(
+            {
+                "success": False,
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Unsupported or repeated query parameters.",
+                },
+            }
+        ), 400
     settings = current_app.config["TASKFORGE_SETTINGS"]
     window = request.args.get("window", settings.metrics_default_window)
     if window not in {"1h", "24h", "7d"}:

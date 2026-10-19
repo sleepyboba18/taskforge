@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
+from unittest.mock import patch
 
+from app import create_app
 from app.api.audit import _parse_filters
-from app.models import AuditActorType, AuditEntityType, AuditEvent, AuditEventType
+from app.models import AuditActorType, AuditEntityType, AuditEvent, AuditEventType, User, UserRole
 
 
 class AuditModelTests(unittest.TestCase):
@@ -37,3 +40,25 @@ class AuditFilterTests(unittest.TestCase):
         app = Flask(__name__)
         with app.test_request_context("/?event_type=NOT_REAL"):
             self.assertIsNone(_parse_filters())
+
+
+class AuditRouteValidationTests(unittest.TestCase):
+    def test_unknown_and_repeated_filters_are_rejected(self) -> None:
+        app = create_app()
+        app.config["TASKFORGE_SETTINGS"] = replace(
+            app.config["TASKFORGE_SETTINGS"], rate_limit_enabled=False
+        )
+        client = app.test_client()
+        operator = User(
+            id=uuid.uuid4(), username="operator", email="operator@example.com",
+            password_hash="fake-test-hash", role=UserRole.OPERATOR, is_active=True,
+        )
+        with patch("app.auth.decorators.authenticate_request", return_value=(operator, None)), patch(
+            "app.api.audit.list_events"
+        ) as list_events:
+            unknown = client.get("/api/v1/audit-events?sort=anything")
+            repeated = client.get("/api/v1/audit-events?page=1&page=2")
+
+        self.assertEqual(400, unknown.status_code)
+        self.assertEqual(400, repeated.status_code)
+        list_events.assert_not_called()

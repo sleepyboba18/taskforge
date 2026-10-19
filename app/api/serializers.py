@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.models import Job
+from app.models import Job, JobAttempt
 from app.models import DeadLetterJob
 from app.models import Worker
 
@@ -30,6 +30,20 @@ def job_to_dict(job: Job) -> dict[str, Any]:
         "worker_id": str(job.worker_id) if job.worker_id else None,
         "recurring_job_id": str(job.recurring_job_id) if job.recurring_job_id else None,
         "workflow_id": str(job.workflow_id) if job.workflow_id else None,
+    }
+
+
+def attempt_to_dict(attempt: JobAttempt) -> dict[str, Any]:
+    """Convert an execution attempt without exposing raw exception text."""
+    return {
+        "id": str(attempt.id),
+        "job_id": str(attempt.job_id),
+        "attempt_number": attempt.attempt_number,
+        "worker_id": str(attempt.worker_id) if attempt.worker_id else None,
+        "status": attempt.status.value,
+        "started_at": _isoformat(attempt.started_at),
+        "last_heartbeat_at": _isoformat(attempt.last_heartbeat_at),
+        "finished_at": _isoformat(attempt.finished_at),
     }
 
 

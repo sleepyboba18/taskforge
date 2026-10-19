@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+import uuid
 from dataclasses import replace
 import os
 from unittest.mock import patch
@@ -24,6 +25,12 @@ class ApiErrorBoundaryTests(unittest.TestCase):
         self.assertTrue(response.is_json)
         self.assertEqual("RESOURCE_NOT_FOUND", response.get_json()["error"]["code"])
         self.assertEqual(response.headers["X-Request-ID"], response.get_json()["request_id"])
+
+    def test_malformed_request_id_is_replaced_with_uuid(self) -> None:
+        response = self.client.get("/health", headers={"X-Request-ID": "not-a-uuid"})
+        generated_id = response.headers["X-Request-ID"]
+        self.assertNotEqual("not-a-uuid", generated_id)
+        self.assertEqual(generated_id, str(uuid.UUID(generated_id)))
 
     def test_unsupported_method_returns_json(self) -> None:
         response = self.client.put("/api/v1/health")

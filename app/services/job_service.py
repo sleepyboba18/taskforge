@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database.repositories.job_repository import (
@@ -17,7 +17,7 @@ from app.database.repositories.job_repository import (
     list_jobs as repository_list_jobs,
 )
 from app.database.session import session_scope
-from app.models import DeadLetterJob, Job, JobStatus, Workflow
+from app.models import DeadLetterJob, Job, JobAttempt, JobStatus, Workflow
 from app.services.dependency_service import add_edges, propagate_dependency_failure
 from app.services.audit_service import record_current
 from app.models import AuditEntityType, AuditEventType
@@ -145,6 +145,37 @@ def list_jobs(
             return jobs, total
     except SQLAlchemyError as exc:
         logger.exception("Database error while listing jobs")
+        raise JobDatabaseError from exc
+
+
+def list_job_attempts(
+    job_id: uuid.UUID, *, page: int, per_page: int
+) -> tuple[list[JobAttempt], int]:
+    """Return one bounded page of execution attempts for an existing job."""
+    try:
+        with session_scope() as session:
+            if session.get(Job, job_id) is None:
+                raise JobNotFoundError
+            filters = (JobAttempt.job_id == job_id,)
+            total = session.scalar(
+                select(func.count()).select_from(JobAttempt).where(*filters)
+            ) or 0
+            attempts = list(
+                session.scalars(
+                    select(JobAttempt)
+                    .where(*filters)
+                    .order_by(JobAttempt.attempt_number.asc(), JobAttempt.id.asc())
+                    .offset((page - 1) * per_page)
+                    .limit(per_page)
+                )
+            )
+            for attempt in attempts:
+                session.expunge(attempt)
+            return attempts, total
+    except JobNotFoundError:
+        raise
+    except SQLAlchemyError as exc:
+        logger.exception("Database error listing attempts for job %s", job_id)
         raise JobDatabaseError from exc
 
 

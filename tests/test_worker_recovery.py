@@ -40,6 +40,21 @@ class WorkerHealthApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/workers?status=UNKNOWN")
         self.assertEqual(400, response.status_code)
 
+    def test_worker_list_is_paginated_and_status_filtered(self) -> None:
+        with patch("app.api.workers.list_workers", return_value=([], 23)) as list_workers:
+            response = self.client.get("/api/v1/workers?status=IDLE&page=2&per_page=10")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"page": 2, "per_page": 10, "total": 23, "pages": 3}, response.get_json()["pagination"])
+        list_workers.assert_called_once_with(status=WorkerStatus.IDLE, page=2, per_page=10)
+
+    def test_worker_list_rejects_unknown_filters(self) -> None:
+        with patch("app.api.workers.list_workers") as list_workers:
+            response = self.client.get("/api/v1/workers?sort=hostname")
+
+        self.assertEqual(400, response.status_code)
+        list_workers.assert_not_called()
+
     def test_worker_detail_is_serialized(self) -> None:
         worker = Worker(
             id=uuid.uuid4(), worker_name="worker-instance", hostname="host", process_id=123,

@@ -29,6 +29,11 @@ class AdminRouteTests(unittest.TestCase):
         response = self.client.post("/api/v1/admin/jobs/cancel", json={"job_ids": ["bad"] * 101})
         self.assertEqual(400, response.status_code)
 
+    def test_bulk_ids_reject_unhashable_values(self) -> None:
+        response = self.client.post("/api/v1/admin/jobs/cancel", json={"job_ids": [["not", "a", "uuid"]]})
+        self.assertEqual(400, response.status_code)
+        self.assertEqual("VALIDATION_ERROR", response.get_json()["error"]["code"])
+
     def test_queue_pause_is_idempotent_at_service_boundary(self) -> None:
         with patch("app.api.admin.set_queue_paused", return_value={"paused": True, "result": "already_paused"}):
             response = self.client.post("/api/v1/admin/queue/pause")

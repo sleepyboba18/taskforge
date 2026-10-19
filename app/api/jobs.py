@@ -9,7 +9,8 @@ from typing import Any
 
 from flask import Blueprint, current_app, g, has_app_context, jsonify, request
 
-from app.api.serializers import job_to_dict
+from app.api.pagination import pagination_metadata, parse_pagination, validate_query_parameters
+from app.api.serializers import attempt_to_dict, job_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED, OPERATORS
 from app.lifecycle import get_lifecycle
@@ -24,6 +25,7 @@ from app.services.job_service import (
     bulk_retry_jobs,
     create_job,
     get_job_by_id,
+    list_job_attempts,
     list_jobs,
 )
 from app.services.dependency_service import (
@@ -62,7 +64,13 @@ def _bulk_action(action, operation):
     body = request.get_json(silent=True)
     ids = body.get("job_ids") if isinstance(body, dict) else None
     maximum = current_app.config["TASKFORGE_SETTINGS"].max_bulk_job_operations
-    if not isinstance(ids, list) or len(ids) > maximum or len(set(ids)) != len(ids):
+    if (
+        not isinstance(ids, list)
+        or len(ids) > maximum
+        or any(not isinstance(value, str) for value in ids)
+    ):
+        return _error("VALIDATION_ERROR", f"job_ids must be a unique array of at most {maximum} UUIDs.", status=400)
+    if len(set(ids)) != len(ids):
         return _error("VALIDATION_ERROR", f"job_ids must be a unique array of at most {maximum} UUIDs.", status=400)
     try:
         parsed = [uuid.UUID(value) for value in ids if isinstance(value, str)]
@@ -116,6 +124,10 @@ def submit_job():
 @rate_limit("read")
 def get_jobs():
     """Return a filtered, database-paginated job collection."""
+    if validate_query_parameters(
+        request.args, {"page", "per_page", "status", "task_type", "priority", "sort"}
+    ):
+        return _error("VALIDATION_ERROR", "Repeated query parameters are not supported.", status=400)
     values, errors = _validate_list_query(request.args)
     if errors:
         return _error("VALIDATION_ERROR", "Invalid query parameters.", details=errors, status=400)
@@ -154,6 +166,33 @@ def get_job(job_id: str):
     except JobDatabaseError:
         return _error("DATABASE_ERROR", "Unable to retrieve job.", status=500)
     return jsonify({"success": True, "data": job_to_dict(job)})
+
+
+@jobs_bp.get("/<job_id>/attempts")
+@require_roles(*AUTHENTICATED)
+@rate_limit("read")
+def list_job_attempts_endpoint(job_id: str):
+    parsed_id, error = _parse_uuid(job_id)
+    if error:
+        return error
+    if validate_query_parameters(request.args, {"page", "per_page"}):
+        return _error("VALIDATION_ERROR", "Unsupported or repeated query parameters.", status=400)
+    page, per_page, errors = parse_pagination(request.args)
+    if errors:
+        return _error("VALIDATION_ERROR", "Invalid pagination.", details=errors, status=400)
+    try:
+        attempts, total = list_job_attempts(parsed_id, page=page, per_page=per_page)
+    except JobNotFoundError:
+        return _error("JOB_NOT_FOUND", "Job not found.", status=404)
+    except JobDatabaseError:
+        return _error("DATABASE_ERROR", "Unable to list job attempts.", status=500)
+    return jsonify(
+        {
+            "success": True,
+            "data": [attempt_to_dict(attempt) for attempt in attempts],
+            "pagination": pagination_metadata(page, per_page, total),
+        }
+    )
 
 
 @jobs_bp.post("/<job_id>/cancel")

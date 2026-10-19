@@ -8,6 +8,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from app.api.pagination import validate_query_parameters
 from app.api.serializers import dead_letter_to_dict, job_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED, OPERATORS
@@ -32,6 +33,10 @@ MAX_PER_PAGE = 100
 @require_roles(*AUTHENTICATED)
 @rate_limit("read")
 def list_dead_letter_endpoint():
+    if validate_query_parameters(
+        request.args, {"page", "per_page", "job_id", "recurring_job_id", "task_type"}
+    ):
+        return _error("VALIDATION_ERROR", "Unsupported or repeated query parameters.", 400)
     page, per_page, errors = _pagination(request.args)
     if errors:
         return _error("VALIDATION_ERROR", "Invalid query parameters.", 400, errors)

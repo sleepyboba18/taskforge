@@ -95,8 +95,12 @@ def create_app(settings: Settings | None = None) -> Flask:
             response.headers["X-Request-ID"] = request_id
             if response.is_json:
                 body = response.get_json(silent=True)
-                if isinstance(body, dict) and body.get("success") is False and "request_id" not in body:
-                    body["request_id"] = request_id
+                if isinstance(body, dict) and body.get("success") is False:
+                    error = body.get("error")
+                    if isinstance(error, dict):
+                        error.setdefault("code", "REQUEST_ERROR")
+                        error.setdefault("message", "Request could not be completed.")
+                    body.setdefault("request_id", request_id)
                     response.set_data(jsonify(body).get_data())
         started_at = getattr(g, "request_started_at", None)
         if started_at is not None:

@@ -168,7 +168,13 @@ def _bulk(action, operation):
     body = request.get_json(silent=True)
     ids = body.get("job_ids") if isinstance(body, dict) else None
     maximum = current_app.config["TASKFORGE_SETTINGS"].admin_bulk_action_limit
-    if not isinstance(ids, list) or len(ids) > maximum or len(set(ids)) != len(ids):
+    if (
+        not isinstance(ids, list)
+        or len(ids) > maximum
+        or any(not isinstance(value, str) for value in ids)
+    ):
+        return _error("VALIDATION_ERROR", f"job_ids must be a unique array of at most {maximum} UUIDs.", 400)
+    if len(set(ids)) != len(ids):
         return _error("VALIDATION_ERROR", f"job_ids must be a unique array of at most {maximum} IDs.", 400)
     try:
         parsed = [uuid.UUID(value) for value in ids]

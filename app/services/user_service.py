@@ -6,7 +6,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.auth.password import hash_password, verify_password
@@ -79,13 +79,21 @@ def create_user(*, username: str, email: str, password: str, role: UserRole) -> 
         raise UserDatabaseError from exc
 
 
-def list_users() -> list[User]:
+def list_users(*, page: int = 1, per_page: int = 20) -> tuple[list[User], int]:
     try:
         with session_scope() as session:
-            users = list(session.scalars(select(User).order_by(User.created_at.desc())))
+            total = session.scalar(select(func.count()).select_from(User)) or 0
+            users = list(
+                session.scalars(
+                    select(User)
+                    .order_by(User.created_at.desc(), User.id.asc())
+                    .offset((page - 1) * per_page)
+                    .limit(per_page)
+                )
+            )
             for user in users:
                 session.expunge(user)
-            return users
+            return users, total
     except SQLAlchemyError as exc:
         raise UserDatabaseError from exc
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from app.api.pagination import pagination_metadata, parse_pagination, validate_query_parameters
 from app.api.serializers import worker_to_dict
 from app.auth.decorators import require_roles
 from app.auth.permissions import AUTHENTICATED
@@ -21,6 +22,11 @@ workers_bp = Blueprint("workers", __name__, url_prefix="/api/v1/workers")
 @require_roles(*AUTHENTICATED)
 @rate_limit("read")
 def list_workers_endpoint():
+    if validate_query_parameters(request.args, {"page", "per_page", "status"}):
+        return _error("VALIDATION_ERROR", "Unsupported query parameters.", 400)
+    page, per_page, errors = parse_pagination(request.args)
+    if errors:
+        return _error("VALIDATION_ERROR", "Invalid pagination.", 400)
     value = request.args.get("status")
     status = None
     if value is not None:
@@ -29,10 +35,16 @@ def list_workers_endpoint():
         except ValueError:
             return _error("VALIDATION_ERROR", "Worker status is invalid.", 400)
     try:
-        workers = list_workers(status=status)
+        workers, total = list_workers(status=status, page=page, per_page=per_page)
     except WorkerDatabaseError:
         return _error("DATABASE_ERROR", "Unable to list workers.", 500)
-    return jsonify({"success": True, "data": [worker_to_dict(worker) for worker in workers]})
+    return jsonify(
+        {
+            "success": True,
+            "data": [worker_to_dict(worker) for worker in workers],
+            "pagination": pagination_metadata(page, per_page, total),
+        }
+    )
 
 
 @workers_bp.get("/health")

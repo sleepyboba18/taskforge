@@ -64,6 +64,15 @@ class ObservabilityRouteTests(unittest.TestCase):
         response = self.client.get("/api/v1/metrics?window=30d")
         self.assertEqual(400, response.status_code)
 
+    def test_metrics_rejects_unknown_and_repeated_query_parameters(self) -> None:
+        with patch("app.api.observability.collect_metrics") as collect:
+            unknown = self.client.get("/api/v1/metrics?debug=true")
+            repeated = self.client.get("/api/v1/metrics?window=1h&window=24h")
+
+        self.assertEqual(400, unknown.status_code)
+        self.assertEqual(400, repeated.status_code)
+        collect.assert_not_called()
+
     def test_viewer_can_read_detailed_health(self) -> None:
         with patch(
             "app.api.observability.detailed_health",

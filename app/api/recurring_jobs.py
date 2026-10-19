@@ -7,6 +7,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from app.api.pagination import pagination_metadata, parse_pagination, validate_query_parameters
 from app.services.recurring_job_service import (
     RecurringJobDatabaseError,
     RecurringJobNotFoundError,
@@ -46,6 +47,11 @@ def create_recurring_job_endpoint():
 @require_roles(*AUTHENTICATED)
 @rate_limit("read")
 def list_recurring_job_endpoint():
+    if validate_query_parameters(request.args, {"enabled", "page", "per_page"}):
+        return _error("VALIDATION_ERROR", "Unsupported query parameters.", 400)
+    page, per_page, errors = parse_pagination(request.args)
+    if errors:
+        return _error("VALIDATION_ERROR", "Invalid pagination.", 400)
     enabled_value = request.args.get("enabled")
     enabled = None
     if enabled_value is not None:
@@ -53,10 +59,16 @@ def list_recurring_job_endpoint():
             return _error("VALIDATION_ERROR", "enabled must be true or false.", 400)
         enabled = enabled_value.lower() == "true"
     try:
-        recurring_jobs = list_recurring_jobs(enabled=enabled)
+        recurring_jobs, total = list_recurring_jobs(enabled=enabled, page=page, per_page=per_page)
     except RecurringJobDatabaseError:
         return _error("DATABASE_ERROR", "Unable to list recurring jobs.", 500)
-    return jsonify({"success": True, "data": [recurring_to_dict(job) for job in recurring_jobs]})
+    return jsonify(
+        {
+            "success": True,
+            "data": [recurring_to_dict(job) for job in recurring_jobs],
+            "pagination": pagination_metadata(page, per_page, total),
+        }
+    )
 
 
 @recurring_jobs_bp.get("/<recurring_job_id>")

@@ -5,12 +5,13 @@ from __future__ import annotations
 import unittest
 import uuid
 from dataclasses import replace
-from datetime import timezone
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app import create_app
 from app.api.jobs import _validate_job_input
-from app.models import Job, JobStatus, User, UserRole
+from app.models import AttemptStatus, Job, JobStatus, User, UserRole
 from app.services.job_service import JobStateConflictError
 
 
@@ -99,3 +100,28 @@ class JobRouteTests(unittest.TestCase):
         response = self.client.get("/api/v1/jobs?per_page=101")
         self.assertEqual(400, response.status_code)
         self.assertEqual("VALIDATION_ERROR", response.get_json()["error"]["code"])
+
+    def test_job_attempts_are_paginated_and_hide_raw_errors(self) -> None:
+        attempt = SimpleNamespace(
+            id=uuid.uuid4(),
+            job_id=uuid.uuid4(),
+            attempt_number=2,
+            worker_id=None,
+            status=AttemptStatus.FAILED,
+            started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            last_heartbeat_at=None,
+            finished_at=datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc),
+            error_message="private exception details",
+        )
+        job_id = uuid.uuid4()
+        attempt.job_id = job_id
+        with patch("app.api.jobs.list_job_attempts", return_value=([attempt], 12)) as list_attempts:
+            response = self.client.get(f"/api/v1/jobs/{job_id}/attempts?page=2&per_page=5")
+
+        self.assertEqual(200, response.status_code)
+        body = response.get_json()
+        self.assertEqual({"page": 2, "per_page": 5, "total": 12, "pages": 3}, body["pagination"])
+        self.assertEqual("FAILED", body["data"][0]["status"])
+        self.assertNotIn("error_message", body["data"][0])
+        self.assertNotIn("private exception details", response.get_data(as_text=True))
+        list_attempts.assert_called_once_with(job_id, page=2, per_page=5)
