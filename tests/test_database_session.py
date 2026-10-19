@@ -5,10 +5,20 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.database.session import session_scope
+from app.database.session import dispose_database, initialize_database, session_scope
 
 
 class SessionScopeTests(unittest.TestCase):
+    def test_database_engine_hides_bound_parameters(self) -> None:
+        with patch("app.database.session.create_engine") as create_engine:
+            dispose_database()
+            try:
+                initialize_database("postgresql+psycopg://fake:fake@localhost/taskforge")
+            finally:
+                dispose_database()
+
+        self.assertTrue(create_engine.call_args.kwargs["hide_parameters"])
+
     @patch("app.database.session.get_session_factory")
     def test_exception_rolls_back_and_closes_session(self, get_factory) -> None:
         session = MagicMock()

@@ -65,7 +65,6 @@ class Settings:
     max_dependency_graph_nodes: int
     max_dependency_propagation_depth: int
     max_bulk_job_operations: int
-    audit_retention_days: int
     long_running_job_threshold_seconds: int
     queue_backlog_warning_threshold: int
     dlq_backlog_warning_threshold: int
@@ -149,7 +148,6 @@ class Settings:
             max_dependency_graph_nodes=_parse_bounded_int("MAX_DEPENDENCY_GRAPH_NODES", default=1000, maximum=100000),
             max_dependency_propagation_depth=_parse_bounded_int("MAX_DEPENDENCY_PROPAGATION_DEPTH", default=50, maximum=1000),
             max_bulk_job_operations=_parse_bounded_int("MAX_BULK_JOB_OPERATIONS", default=100, maximum=1000),
-            audit_retention_days=_parse_non_negative_bounded_int("AUDIT_RETENTION_DAYS", default=0, maximum=3650),
             long_running_job_threshold_seconds=_parse_bounded_int("LONG_RUNNING_JOB_THRESHOLD_SECONDS", default=300, maximum=86400),
             queue_backlog_warning_threshold=_parse_non_negative_bounded_int("QUEUE_BACKLOG_WARNING_THRESHOLD", default=100, maximum=1000000),
             dlq_backlog_warning_threshold=_parse_non_negative_bounded_int("DLQ_BACKLOG_WARNING_THRESHOLD", default=50, maximum=1000000),

@@ -32,7 +32,7 @@ def initialize_database(
     if _engine is not None:
         return
     if database_url.startswith("sqlite"):
-        _engine = create_engine(database_url, pool_pre_ping=True)
+        _engine = create_engine(database_url, pool_pre_ping=True, hide_parameters=True)
     else:
         _engine = create_engine(
             database_url,
@@ -41,6 +41,7 @@ def initialize_database(
             pool_timeout=pool_timeout,
             pool_recycle=pool_recycle,
             pool_pre_ping=True,
+            hide_parameters=True,
         )
     _session_factory = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
     logger.info("Initialized SQLAlchemy database engine")

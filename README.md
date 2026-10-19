@@ -1,6 +1,6 @@
 # TaskForge
 
-TaskForge is a production-oriented foundation for a PostgreSQL-backed background job processing system. Modules 1 and 2 provide the Flask application factory, environment configuration, SQLAlchemy infrastructure, CORS, Socket.IO initialization, structured API errors, a health endpoint, and the persistent queue schema.
+TaskForge is a PostgreSQL-backed background job processing system with a Flask JSON API, authenticated Socket.IO connections, multiprocessing workers, PostgreSQL schedulers, retries, recovery, audit history, and operational monitoring. PostgreSQL is the durable source of truth for jobs and coordination.
 
 ## Technologies
 
@@ -13,9 +13,9 @@ TaskForge is a production-oriented foundation for a PostgreSQL-backed background
 
 ## Architecture
 
-`main.py` is the thin executable entry point. The `app` package owns configuration, database infrastructure, HTTP APIs, Socket.IO extensions, and reserved service and worker packages. Database sessions are created per operation so future worker processes can manage their own PostgreSQL transactions.
+`main.py` is the canonical executable entry point. The `app` package separates configuration, database repositories, services, HTTP APIs, Socket.IO, and worker processes. Each process initializes its own SQLAlchemy engine and uses short-lived sessions.
 
-The database is Supabase-hosted PostgreSQL and remains the source of truth for durable job state. SQLAlchemy models define `Job`, `JobAttempt`, and `Worker`, including controlled statuses, JSONB payloads, UUID identifiers, retry metadata, execution history, ownership references, and queue-oriented indexes. A job progresses conceptually from pending or scheduled work through running, retrying, completed, failed, or cancelled states; worker processes and execution behavior are planned for later modules.
+The database may be Supabase PostgreSQL or another PostgreSQL deployment. SQLAlchemy models define jobs, attempts, workers, recurring definitions, workflows, audit events, rate-limit state, and their constraints and indexes. Jobs move through validated pending, scheduled, running, retrying, completed, failed, and cancelled states.
 
 ## Setup
 
@@ -58,13 +58,13 @@ TaskForge manages a complete application lifecycle from startup through graceful
 
 The application follows a deterministic startup sequence:
 1. Load and validate environment configuration
-2. Initialize logging
-3. Initialize Flask application and database connection
-4. Initialize worker pool
-5. Initialize scheduler processes
-6. Transition to RUNNING state
+2. Initialize the SQLAlchemy engine and verify PostgreSQL connectivity
+3. Initialize logging and the Flask/Socket.IO application
+4. Transition lifecycle state to RUNNING
+5. Start worker and scheduler processes
+6. Start serving HTTP and Socket.IO traffic
 
-Startup errors are logged and the process exits with status 1. Partial initialization is cleaned up automatically.
+Configuration and PostgreSQL connectivity are checked before the Flask app and worker processes start. Startup errors are logged without printing credentials, and the process exits with status 1. Partial initialization is cleaned up automatically.
 
 ### Graceful Shutdown
 
@@ -76,7 +76,7 @@ The application handles `SIGINT` (Ctrl+C) and `SIGTERM` signals by initiating gr
 4. Readiness probe becomes unavailable (return HTTP 503)
 5. Scheduler stops creating new jobs
 6. Workers drain current work without claiming new jobs
-7. Wait up to `SHUTDOWN_TIMEOUT_SECONDS` for workers to finish
+7. Wait within the overall `SHUTDOWN_TIMEOUT_SECONDS` budget for workers to finish
 8. Force-terminate any remaining workers
 9. Dispose SQLAlchemy database resources
 10. Emit final metrics
@@ -94,7 +94,7 @@ WORKER_SHUTDOWN_TIMEOUT=30
 - `SHUTDOWN_TIMEOUT_SECONDS`: Total time allocated for graceful shutdown (default 60s, max 600s)
 - `WORKER_SHUTDOWN_TIMEOUT`: Time to wait for individual workers to exit gracefully (default 30s, max 300s)
 
-Workers that exceed the shutdown timeout are force-terminated. The total shutdown timeout must be greater than or equal to the worker shutdown timeout.
+Workers that exceed the overall shutdown timeout are force-terminated. `WORKER_SHUTDOWN_TIMEOUT` caps the graceful wait for each process; `SHUTDOWN_TIMEOUT_SECONDS` caps the aggregate graceful wait.
 
 ### Shutdown Behavior
 
@@ -239,7 +239,7 @@ Workflow membership does not create dependencies automatically. Explicit Job dep
 
 ## Audit Trail
 
-Application logs remain technical runtime diagnostics. The append-only PostgreSQL audit trail records meaningful business and security actions without storing passwords, tokens, authorization headers, database credentials, or complete Job payloads. `AUDIT_RETENTION_DAYS=0` means unlimited retention; this module does not automatically delete audit history.
+Application logs remain technical runtime diagnostics. The append-only PostgreSQL audit trail records meaningful business and security actions without storing passwords, tokens, authorization headers, database credentials, or complete Job payloads. Audit records are retained indefinitely; TaskForge does not automatically delete audit history.
 
 ## Execution History
 
@@ -316,7 +316,7 @@ The existing logger records request ID, method, route, status, duration, actor c
 
 ## Telemetry Retention
 
-Monitoring does not create a row per observation or maintain a time-series database. Persistent audit history remains controlled by `AUDIT_RETENTION_DAYS=0` (unlimited) and is not automatically deleted. PostgreSQL operational records are queried with bounded windows and aggregate expressions.
+Monitoring does not create a row per observation or maintain a time-series database. Audit history is retained indefinitely and is not automatically deleted. PostgreSQL operational records are queried with bounded windows and aggregate expressions.
 
 Configure thresholds in `.env` with `LONG_RUNNING_JOB_THRESHOLD_SECONDS`, `QUEUE_BACKLOG_WARNING_THRESHOLD`, `DLQ_BACKLOG_WARNING_THRESHOLD`, and `WORKER_SATURATION_THRESHOLD_PERCENT`. Monitoring failures return a controlled `MONITORING_UNAVAILABLE` response and never expose SQLAlchemy errors, connection strings, secrets, or Job payloads.
 
@@ -542,14 +542,13 @@ Recovery re-checks Worker, Job, and Attempt state after locking. A worker heartb
 
 ## Initialize the Schema
 
-After configuring a valid Supabase `DATABASE_URL`, initialize missing ORM tables from a Python shell:
+TaskForge does not include migration scripts. On a new database, initialize missing ORM tables using the documented schema initializer. Existing tables are not altered or dropped. For a production database, apply schema changes through your reviewed deployment process before upgrading the application.
 
 ```text
 python -c "from app.config.settings import Settings; from app.database.session import initialize_database, initialize_schema; initialize_database(Settings.from_environment().database_url); initialize_schema()"
 ```
 
-Schema initialization creates missing tables only. It does not drop, reset, or modify existing tables. Queue claiming, workers, retries, and scheduling are not implemented yet.
-Modules 1 through 3 provide the Flask application factory, environment configuration, SQLAlchemy infrastructure, CORS, Socket.IO initialization, structured API errors, a health endpoint, the persistent queue schema, and the job submission API.
+Schema initialization creates missing tables only. It does not drop, reset, or modify existing tables. `python main.py` checks that PostgreSQL is reachable and does not automatically create or migrate the schema during normal startup.
 
 ## Job API
 
@@ -586,7 +585,7 @@ The built-in task registry currently supports the safe `echo` task and a bounded
 
 Failed executions use the persisted retry lifecycle `RUNNING -> RETRYING -> PENDING -> RUNNING`. `max_retries` counts retries after the initial attempt, while `retry_count` records retries already scheduled. For example, `max_retries=3` permits attempts 1 through 4. Retry delays use capped exponential backoff: `RETRY_BASE_DELAY * 2^(retry_number - 1)`, limited by `RETRY_MAX_DELAY`.
 
-Retry timestamps are stored in PostgreSQL as `next_retry_at`. A dedicated scheduler process promotes due `RETRYING` jobs in bounded, row-locked batches; workers then create the next `JobAttempt` only when they claim the promoted `PENDING` job. `NonRetryableTaskError` skips retries and immediately marks the job failed. Configure `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY`, `RETRY_POLL_INTERVAL`, and `RETRY_BATCH_SIZE` in `.env`. Retry events include `job:retrying`, `job:retry_ready`, and the existing `job:failed`. Advanced scheduling, recovery, and administrative retries are not implemented yet.
+Retry timestamps are stored in PostgreSQL as `next_retry_at`. A dedicated scheduler process promotes due `RETRYING` jobs in bounded, row-locked batches; workers create the next `JobAttempt` when they claim the promoted `PENDING` job. `NonRetryableTaskError` skips retries and immediately marks the job failed. Configure `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY`, `RETRY_POLL_INTERVAL`, and `RETRY_BATCH_SIZE` in `.env`. Retry events include `job:retrying`, `job:retry_ready`, and `job:failed`.
 
 ## One-Time Scheduling
 
@@ -601,7 +600,7 @@ Submit a job with a timezone-aware `scheduled_at` value to persist it as `SCHEDU
 }
 ```
 
-The scheduler polls PostgreSQL and promotes due jobs from `SCHEDULED` to `PENDING` using short `FOR UPDATE SKIP LOCKED` transactions. Workers continue to claim only `PENDING` jobs. The original `scheduled_at` is preserved; retries use `next_retry_at` separately. Past or current scheduled times become immediately eligible as `PENDING`, while cancelled scheduled jobs are never promoted. Scheduling is polling-based, so `scheduled_at` is the earliest intended eligibility time rather than an exact execution guarantee. Configure `SCHEDULER_POLL_INTERVAL` and `SCHEDULER_BATCH_SIZE` in `.env`. Recurring scheduling is not implemented.
+The scheduler polls PostgreSQL and promotes due jobs from `SCHEDULED` to `PENDING` using short `FOR UPDATE SKIP LOCKED` transactions. Workers continue to claim only `PENDING` jobs. The original `scheduled_at` is preserved; retries use `next_retry_at` separately. Past or current scheduled times become immediately eligible as `PENDING`, while cancelled scheduled jobs are never promoted. Scheduling is polling-based, so `scheduled_at` is the earliest intended eligibility time rather than an exact execution guarantee. Configure `SCHEDULER_POLL_INTERVAL` and `SCHEDULER_BATCH_SIZE` in `.env`.
 
 ## Recurring Jobs
 
@@ -644,8 +643,4 @@ Each worker registers a unique UUID and process instance in PostgreSQL, then sen
 
 The recovery scheduler conservatively marks a worker `STALE` only after its heartbeat exceeds `WORKER_STALE_TIMEOUT`. It then locks and re-checks the Worker, Job, and running JobAttempt ownership before recovering an abandoned execution. Worker loss is recorded as `WORKER_LOST` and follows the existing retry policy or DLQ path. Graceful shutdown marks workers `STOPPED`, so they are not treated as crashed. Configure `WORKER_HEARTBEAT_INTERVAL`, `WORKER_STALE_TIMEOUT`, and `RECOVERY_POLL_INTERVAL`; defaults are 5, 30, and 10 seconds. Recovery emits `job:recovered` and does not broadcast every heartbeat.
 
-## Worker Heartbeats and Recovery
-
-Each worker registers a unique UUID and UUID-suffixed instance name in PostgreSQL, then updates `last_heartbeat_at` independently of task execution. Active attempts receive the same heartbeat timestamp through a separate SQLAlchemy session. Worker health is derived from PostgreSQL; `GET /api/v1/workers`, `GET /api/v1/workers/<worker_id>`, and `GET /api/v1/workers/health` expose safe status metadata.
-
-When a worker heartbeat exceeds `WORKER_STALE_TIMEOUT`, the recovery scheduler locks and re-checks the Worker, Job, and running JobAttempt. Only a matching `STALE` worker with a still-running owned attempt is recovered. Worker loss is recorded as `WORKER_LOST`, then the existing retry policy sends the Job to `RETRYING` or the existing DLQ. Graceful shutdown marks workers `STOPPED`, and does not treat them as stale. Configure `WORKER_HEARTBEAT_INTERVAL`, `WORKER_STALE_TIMEOUT`, and `RECOVERY_POLL_INTERVAL`; the defaults are 5, 30, and 10 seconds.
+TaskForge does not currently ship versioned migrations. Schema evolution for deployed installations must be reviewed and applied before running newer application code.
