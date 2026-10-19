@@ -421,6 +421,10 @@ Administrative controls live under `/api/v1/admin`, require `OPERATOR` or `ADMIN
 
 Required deployment secrets are never logged or returned. Production requires explicit strong `SECRET_KEY` and `JWT_SECRET_KEY` values, `DEBUG=false`, and explicit `CORS_ORIGINS`; wildcard credentialed CORS is rejected. The sanitized startup log reports only environment, host, port, database configuration presence, worker count, and CORS configuration presence.
 
+## Database Connection Pools
+
+`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`, and `DB_POOL_RECYCLE` configure each process-local SQLAlchemy pool. The web process, each worker, and each scheduler own separate pools; the configured peak connection ceiling is approximately `(WORKER_COUNT + 5) * (DB_POOL_SIZE + DB_MAX_OVERFLOW)`. Set these values against the connection limit allocated to TaskForge in PostgreSQL/Supabase, accounting for any other applications sharing that database.
+
 ## Environment Variables
 
 Use `.env.example` as the local template. Important settings include `DATABASE_URL`, `SECRET_KEY`, `JWT_SECRET_KEY`, `APP_ENV`, `HOST`, `PORT`, `WORKER_COUNT`, scheduler and retry intervals, `RATE_LIMIT_*`, `MAX_REQUEST_BODY_MB`, `SLOW_REQUEST_THRESHOLD_MS`, monitoring thresholds, `CORS_ORIGINS`, and `CORS_SUPPORTS_CREDENTIALS`. Do not place actual credentials in `.env.example` or commit `.env`.

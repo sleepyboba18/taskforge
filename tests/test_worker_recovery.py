@@ -69,6 +69,29 @@ class WorkerConfigurationTests(unittest.TestCase):
 
 
 class WorkerEventTests(unittest.TestCase):
+    def test_health_summary_uses_one_aggregate_query(self) -> None:
+        scope_patch = patch("app.services.worker_service.session_scope")
+        scope = scope_patch.start()
+        try:
+            session = scope.return_value.__enter__.return_value
+            session.execute.return_value.one.return_value = (8, 5, 2)
+
+            summary = worker_health(stale_timeout=30)
+
+            self.assertEqual(
+                {
+                    "healthy": True,
+                    "total_workers": 8,
+                    "running_workers": 5,
+                    "stale_workers": 2,
+                },
+                summary,
+            )
+            session.execute.assert_called_once()
+            session.scalar.assert_not_called()
+        finally:
+            scope_patch.stop()
+
     def test_health_summary_uses_persistent_worker_query(self) -> None:
         with patch("app.services.worker_service.session_scope") as scope:
             scope.side_effect = RuntimeError("database boundary reached")

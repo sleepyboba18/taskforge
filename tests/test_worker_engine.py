@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from app.database.repositories.job_queue import ClaimedJob
+from app.config.settings import Settings
 from app.models import JobStatus
 from app.services.task_executor import TaskRegistry, TaskValidationError, UnknownTaskError
+from app.workers.manager import WorkerManager
 from app.workers.worker import _job_event
 
 
@@ -43,3 +46,28 @@ class WorkerEventTests(unittest.TestCase):
             event,
         )
         self.assertNotIn("payload", event)
+
+
+class WorkerManagerPoolTests(unittest.TestCase):
+    def test_all_child_processes_receive_configured_pool_limits(self) -> None:
+        settings = replace(
+            Settings.from_environment(),
+            worker_count=1,
+            db_pool_size=3,
+            db_max_overflow=1,
+            db_pool_timeout=13,
+            db_pool_recycle=700,
+        )
+
+        with patch("app.workers.manager.multiprocessing.Process") as process_factory:
+            manager = WorkerManager(settings)
+            manager.start()
+
+        self.assertEqual(5, process_factory.call_count)
+        for call in process_factory.call_args_list:
+            with self.subTest(process=call.kwargs["name"]):
+                child_kwargs = call.kwargs["kwargs"]
+                self.assertEqual(3, child_kwargs["pool_size"])
+                self.assertEqual(1, child_kwargs["max_overflow"])
+                self.assertEqual(13, child_kwargs["pool_timeout"])
+                self.assertEqual(700, child_kwargs["pool_recycle"])

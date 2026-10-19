@@ -50,16 +50,20 @@ def worker_health(*, stale_timeout: float) -> dict[str, int | bool]:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_timeout)
     try:
         with session_scope() as session:
-            total = session.scalar(select(func.count()).select_from(Worker)) or 0
-            healthy = session.scalar(
-                select(func.count()).select_from(Worker).where(
-                    Worker.status.in_([WorkerStatus.IDLE, WorkerStatus.BUSY]),
-                    Worker.last_heartbeat_at >= cutoff,
+            total, healthy, stale = session.execute(
+                select(
+                    func.count().label("total"),
+                    func.count()
+                    .filter(
+                        Worker.status.in_([WorkerStatus.IDLE, WorkerStatus.BUSY]),
+                        Worker.last_heartbeat_at >= cutoff,
+                    )
+                    .label("healthy"),
+                    func.count()
+                    .filter(Worker.status == WorkerStatus.STALE)
+                    .label("stale"),
                 )
-            ) or 0
-            stale = session.scalar(
-                select(func.count()).select_from(Worker).where(Worker.status == WorkerStatus.STALE)
-            ) or 0
+            ).one()
             return {
                 "healthy": healthy > 0,
                 "total_workers": total,

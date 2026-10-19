@@ -39,7 +39,6 @@ class Job(Base):
         ),
         Index("ix_jobs_status_priority_created", "status", desc("priority"), "created_at"),
         Index("ix_jobs_retry_promotion", "status", "next_retry_at"),
-        Index("ix_jobs_workflow_id", "workflow_id"),
         Index("ix_jobs_created_at", "created_at"),
         Index("ix_jobs_status_created_at", "status", "created_at"),
         Index("ix_jobs_status_started_at", "status", "started_at"),

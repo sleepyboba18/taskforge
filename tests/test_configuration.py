@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
+from app import create_app
 from app.config.settings import ConfigurationError, Settings
 
 
@@ -16,6 +18,26 @@ BASE_ENV = {
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_application_passes_pool_settings_to_database_engine(self) -> None:
+        settings = replace(
+            Settings.from_environment(),
+            db_pool_size=4,
+            db_max_overflow=2,
+            db_pool_timeout=17,
+            db_pool_recycle=900,
+        )
+
+        with patch("app.initialize_database") as initialize_database:
+            create_app(settings)
+
+        initialize_database.assert_called_once_with(
+            settings.database_url,
+            pool_size=4,
+            max_overflow=2,
+            pool_timeout=17,
+            pool_recycle=900,
+        )
+
     def test_invalid_database_scheme_is_rejected(self) -> None:
         with patch.dict(os.environ, {**BASE_ENV, "DATABASE_URL": "sqlite:///taskforge.db"}, clear=False):
             with self.assertRaises(ConfigurationError):

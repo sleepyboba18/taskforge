@@ -5,15 +5,20 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from datetime import datetime, timedelta, timezone
+
 import pytest
+from sqlalchemy import event
 
 from app.config.settings import Settings
-from app.database.session import Base, session_scope
+from app.database.session import Base, get_engine, session_scope
 from app.database.repositories.job_queue import claim_next_job
-from app.models import Job, JobAttempt, JobStatus, Worker, WorkerStatus
+from app.models import AttemptStatus, Job, JobAttempt, JobStatus, Worker, WorkerStatus
 from app.services.job_service import bulk_cancel_jobs, bulk_retry_jobs, create_job
 from app.services.monitoring_service import get_monitoring_snapshot
 from app.services.observability_service import collect_metrics
+from app.services.retry_policy import RetryPolicy
+from app.services.worker_recovery_service import recover_stale_workers
 from app.workers.registry import register_worker, set_worker_status
 
 
@@ -44,6 +49,14 @@ def test_index_definitions_exist():
     worker_table = Worker.__table__
     worker_index_names = {idx.name for idx in worker_table.indexes}
     assert "ix_workers_status_heartbeat" in worker_index_names
+
+
+def test_job_workflow_index_is_declared_once():
+    workflow_indexes = [
+        index for index in Job.__table__.indexes if index.name == "ix_jobs_workflow_id"
+    ]
+
+    assert len(workflow_indexes) == 1
 
 
 def test_connection_pool_configuration(monkeypatch):
@@ -162,3 +175,72 @@ def test_monitoring_snapshot_performance(app):
         assert "jobs" in metrics
         assert "throughput" in metrics
         assert "performance" in metrics
+
+
+@pytest.mark.skipif(not os.getenv("TASKFORGE_TEST_DATABASE_URL"), reason="requires PostgreSQL test database")
+def test_stale_worker_recovery_select_count_is_bounded(app):
+    """Recovery reads stale workers and their active jobs in bounded query batches."""
+    worker_count = 3
+    stale_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+    with app.app_context():
+        with session_scope() as session:
+            for index in range(worker_count):
+                worker = Worker(
+                    id=uuid.uuid4(),
+                    worker_name=f"recovery-benchmark-{uuid.uuid4().hex[:8]}",
+                    status=WorkerStatus.BUSY,
+                    hostname="test-host",
+                    process_id=index + 1,
+                    last_heartbeat_at=stale_at,
+                )
+                session.add(worker)
+                session.flush()
+                job = Job(
+                    id=uuid.uuid4(),
+                    name=f"recovery-benchmark-{index}",
+                    task_type="echo",
+                    payload={},
+                    status=JobStatus.RUNNING,
+                    priority=5,
+                    max_retries=3,
+                    retry_count=0,
+                    worker_id=worker.id,
+                    started_at=stale_at,
+                    claimed_at=stale_at,
+                )
+                session.add(job)
+                session.flush()
+                worker.current_job_id = job.id
+                session.add(
+                    JobAttempt(
+                        id=uuid.uuid4(),
+                        job_id=job.id,
+                        attempt_number=1,
+                        worker_id=worker.id,
+                        status=AttemptStatus.RUNNING,
+                        started_at=stale_at,
+                        last_heartbeat_at=stale_at,
+                    )
+                )
+            session.commit()
+
+        select_count = 0
+
+        def count_selects(connection, cursor, statement, parameters, context, executemany):
+            nonlocal select_count
+            if statement.lstrip().upper().startswith("SELECT"):
+                select_count += 1
+
+        engine = get_engine()
+        event.listen(engine, "before_cursor_execute", count_selects)
+        try:
+            outcomes = recover_stale_workers(
+                stale_timeout=30,
+                policy=RetryPolicy(base_delay=0, max_delay=0),
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", count_selects)
+
+        assert len(outcomes) == worker_count
+        assert select_count <= 4, f"{worker_count} recoveries required {select_count} SELECT statements"
