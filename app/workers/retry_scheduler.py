@@ -14,11 +14,21 @@ from app.sockets import publish_event
 logger = logging.getLogger("taskforge.retry_scheduler")
 
 
-def run_retry_scheduler(*, database_url: str, poll_interval: float, batch_size: int, shutdown_event) -> None:
+def run_retry_scheduler(
+    *, database_url: str, poll_interval: float, batch_size: int, shutdown_event,
+    pool_size: int = 10, max_overflow: int = 20,
+    pool_timeout: int = 30, pool_recycle: int = 1800,
+) -> None:
     """Promote due retries without executing tasks or holding long transactions."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     dispose_database()
-    initialize_database(database_url)
+    initialize_database(
+        database_url,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
+    )
     while not shutdown_event.is_set():
         try:
             with session_scope() as session:

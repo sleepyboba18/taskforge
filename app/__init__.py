@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any
 
 from flask import Flask, g, jsonify, request
-from werkzeug.exceptions import BadRequest, MethodNotAllowed, NotFound, RequestEntityTooLarge, UnsupportedMediaType
+from werkzeug.exceptions import UnsupportedMediaType
 from sqlalchemy.exc import SQLAlchemyError
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException

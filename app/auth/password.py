@@ -3,11 +3,14 @@
 from werkzeug.security import check_password_hash, generate_password_hash
 
 MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 1024
 
 
 def validate_password(password: str) -> str | None:
     if not isinstance(password, str) or len(password) < MIN_PASSWORD_LENGTH:
         return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return f"Password must be at most {MAX_PASSWORD_LENGTH} characters."
     return None
 
 

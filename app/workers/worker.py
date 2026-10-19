@@ -39,11 +39,21 @@ def run_worker(
     heartbeat_interval: float,
     shutdown_event,
     max_dependency_propagation_depth: int = 50,
+    pool_size: int = 10,
+    max_overflow: int = 20,
+    pool_timeout: int = 30,
+    pool_recycle: int = 1800,
 ) -> None:
     """Run one worker process using resources initialized inside that process."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     dispose_database()
-    initialize_database(database_url)
+    initialize_database(
+        database_url,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
+    )
     worker_id = uuid.uuid4()
     instance_name = f"{worker_name}-{worker_id.hex[:8]}"
     registered = False
@@ -187,7 +197,11 @@ def _complete_job(claimed: ClaimedJob) -> None:
 
 
 def _fail_job(claimed: ClaimedJob, error: Exception, policy: RetryPolicy, max_dependency_propagation_depth: int = 50) -> None:
-    logger.exception("Job execution failed: %s", claimed.job_id)
+    logger.error(
+        "Job execution failed: job=%s error_type=%s",
+        claimed.job_id,
+        type(error).__name__,
+    )
     try:
         outcome = handle_task_failure(
             job_id=claimed.job_id,

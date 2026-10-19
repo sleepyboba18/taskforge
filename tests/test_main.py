@@ -5,10 +5,41 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.exc import SQLAlchemyError
+
 import main
 
 
 class MainLifecycleTests(unittest.TestCase):
+    def test_database_failure_aborts_startup_before_workers(self) -> None:
+        settings = MagicMock()
+        settings.bootstrap_admin_username = None
+        lifecycle = MagicMock()
+
+        with (
+            patch.object(main.Settings, "from_environment", return_value=settings),
+            patch.object(main, "initialize_database"),
+            patch.object(main, "create_app") as create_app,
+            patch.object(
+                main,
+                "check_database_connection",
+                side_effect=SQLAlchemyError("unavailable"),
+            ),
+            patch.object(main, "WorkerManager") as manager,
+            patch.object(main.socketio, "run"),
+            patch.object(main, "broadcast_server_shutdown"),
+            patch.object(main, "dispose_database") as dispose,
+            patch.object(main, "get_lifecycle", return_value=lifecycle),
+            self.assertRaises(SystemExit) as exit_info,
+        ):
+            main.main()
+
+        self.assertEqual(1, exit_info.exception.code)
+        create_app.assert_not_called()
+        manager.assert_not_called()
+        dispose.assert_called_once_with()
+        lifecycle.mark_failed.assert_called_once()
+
     def test_normal_entry_point_starts_and_cleans_up(self) -> None:
         settings = MagicMock()
         settings.bootstrap_admin_username = None
@@ -22,6 +53,8 @@ class MainLifecycleTests(unittest.TestCase):
         with (
             patch.object(main.Settings, "from_environment", return_value=settings),
             patch.object(main, "create_app", return_value=object()),
+            patch.object(main, "initialize_database"),
+            patch.object(main, "check_database_connection"),
             patch.object(main, "WorkerManager", return_value=manager),
             patch.object(main, "get_lifecycle", return_value=lifecycle),
             patch.object(main, "install_shutdown_handlers"),
@@ -47,15 +80,18 @@ class MainLifecycleTests(unittest.TestCase):
         with (
             patch.object(main.Settings, "from_environment", return_value=settings),
             patch.object(main, "create_app", return_value=object()),
+            patch.object(main, "initialize_database"),
+            patch.object(main, "check_database_connection"),
             patch.object(main, "WorkerManager", return_value=manager),
             patch.object(main, "get_lifecycle", return_value=lifecycle),
             patch.object(main, "install_shutdown_handlers"),
             patch.object(main, "broadcast_server_shutdown") as broadcast,
             patch.object(main, "dispose_database") as dispose,
-            self.assertRaisesRegex(RuntimeError, "controlled startup failure"),
+            self.assertRaises(SystemExit) as exit_info,
         ):
             main.main()
 
+        self.assertEqual(1, exit_info.exception.code)
         manager.stop.assert_called_once_with()
         lifecycle.mark_stopping.assert_called_once_with()
         lifecycle.mark_stopped.assert_called_once_with()

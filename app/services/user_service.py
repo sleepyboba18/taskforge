@@ -47,7 +47,7 @@ def authenticate_user(username: str, password: str) -> User:
             password_hash = user.password_hash if user else _DUMMY_PASSWORD_HASH
             valid = verify_password(password_hash, password)
             if user is None or not valid or not user.is_active:
-                logger.info("Failed login attempt for username: %s", username)
+                logger.info("Failed login attempt")
                 raise InvalidCredentialsError
             user.last_login_at = datetime.now(timezone.utc)
             session.commit()

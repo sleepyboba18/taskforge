@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import time
 
 from app.config.settings import Settings
 from app.workers.worker import run_worker
@@ -132,12 +133,16 @@ class WorkerManager:
         if not self._started:
             return
         self._shutdown_event.set()
+        deadline = time.monotonic() + self.settings.shutdown_timeout_seconds
         for process in self._processes:
-            process.join(timeout=self.settings.worker_shutdown_timeout)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            process.join(timeout=min(self.settings.worker_shutdown_timeout, remaining))
         for process in self._processes:
             if process.is_alive():
                 logger.warning("Terminating unresponsive worker process %s", process.name)
                 process.terminate()
-                process.join()
-        self._processes.clear()
-        self._started = False
+                process.join(timeout=0)
+        self._processes = [process for process in self._processes if process.is_alive()]
+        self._started = bool(self._processes)

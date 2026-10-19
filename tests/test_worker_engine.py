@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import unittest
+import inspect
 from dataclasses import replace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.database.repositories.job_queue import ClaimedJob
 from app.config.settings import Settings
@@ -71,3 +72,42 @@ class WorkerManagerPoolTests(unittest.TestCase):
                 self.assertEqual(1, child_kwargs["max_overflow"])
                 self.assertEqual(13, child_kwargs["pool_timeout"])
                 self.assertEqual(700, child_kwargs["pool_recycle"])
+
+    def test_child_process_kwargs_match_entrypoint_signatures(self) -> None:
+        settings = replace(Settings.from_environment(), worker_count=1)
+        with patch("app.workers.manager.multiprocessing.Process") as process_factory:
+            WorkerManager(settings).start()
+
+        for call in process_factory.call_args_list:
+            target = call.kwargs["target"]
+            with self.subTest(process=call.kwargs["name"]):
+                inspect.signature(target).bind(**call.kwargs["kwargs"])
+
+    def test_stop_bounds_total_join_time_by_shutdown_timeout(self) -> None:
+        elapsed = 0
+
+        def monotonic():
+            return elapsed
+
+        settings = replace(
+            Settings.from_environment(),
+            shutdown_timeout_seconds=10,
+            worker_shutdown_timeout=6,
+        )
+        manager = WorkerManager(settings)
+        manager._started = True
+        manager._shutdown_event = MagicMock()
+        manager._processes = [MagicMock() for _ in range(5)]
+        for process in manager._processes:
+            process.is_alive.return_value = False
+
+            def join(timeout):
+                nonlocal elapsed
+                elapsed += timeout or 0
+
+            process.join.side_effect = join
+
+        with patch("app.workers.manager.time.monotonic", side_effect=monotonic):
+            manager.stop()
+
+        self.assertLessEqual(elapsed, settings.shutdown_timeout_seconds)

@@ -45,6 +45,41 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual(401, response.status_code)
         self.assertEqual("invalid_credentials", response.get_json()["error"]["code"])
 
+    def test_failed_login_log_does_not_include_username(self) -> None:
+        from app.services.user_service import InvalidCredentialsError, authenticate_user
+
+        with patch("app.services.user_service.session_scope") as scope:
+            scope.return_value.__enter__.return_value.scalar.return_value = None
+            with self.assertLogs("taskforge.users", level="INFO") as logs:
+                with self.assertRaises(InvalidCredentialsError):
+                    authenticate_user("bad-user\nforged-line", "fake-password")
+
+        self.assertNotIn("bad-user", "\n".join(logs.output))
+        self.assertNotIn("forged-line", "\n".join(logs.output))
+
+    def test_oversized_password_is_rejected_before_hash_verification(self) -> None:
+        with patch("app.api.auth.authenticate_user") as authenticate:
+            response = self.client.post(
+                "/api/v1/auth/login",
+                json={"username": "operator", "password": "x" * 1025},
+            )
+
+        self.assertEqual(400, response.status_code)
+        authenticate.assert_not_called()
+
+    def test_password_change_reports_oversized_current_password_field(self) -> None:
+        with patch("app.auth.decorators.authenticate_request", return_value=(self.user, None)), patch(
+            "app.api.auth.change_password"
+        ) as change_password:
+            response = self.client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "x" * 1025, "new_password": "new-password-1"},
+            )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn("current_password", response.get_json()["error"]["details"])
+        change_password.assert_not_called()
+
     def test_me_requires_authentication(self) -> None:
         response = self.client.get("/api/v1/auth/me")
         self.assertEqual(401, response.status_code)

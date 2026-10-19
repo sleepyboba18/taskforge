@@ -53,6 +53,22 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 Settings.from_environment()
 
+    def test_production_rejects_weak_jwt_secret(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                **BASE_ENV,
+                "APP_ENV": "production",
+                "SECRET_KEY": "s" * 40,
+                "JWT_SECRET_KEY": "short",
+                "DEBUG": "false",
+                "CORS_ORIGINS": "https://taskforge.example",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(ConfigurationError):
+                Settings.from_environment()
+
     def test_wildcard_credentialed_cors_is_rejected(self) -> None:
         with patch.dict(os.environ, {**BASE_ENV, "CORS_ORIGINS": "*", "CORS_SUPPORTS_CREDENTIALS": "true"}, clear=False):
             with self.assertRaises(ConfigurationError):

@@ -173,6 +173,8 @@ class Settings:
             raise ConfigurationError("SHUTDOWN_TIMEOUT_SECONDS must be >= WORKER_SHUTDOWN_TIMEOUT.")
         if not settings.jwt_secret_key:
             raise ConfigurationError("JWT_SECRET_KEY is required and must not be empty.")
+        if settings.app_env == "production" and len(settings.jwt_secret_key) < 32:
+            raise ConfigurationError("JWT_SECRET_KEY must be at least 32 characters in production.")
         bootstrap_values = (
             settings.bootstrap_admin_username,
             settings.bootstrap_admin_email,

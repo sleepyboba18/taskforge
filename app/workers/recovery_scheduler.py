@@ -16,11 +16,19 @@ def run_recovery_scheduler(
     *, database_url: str, poll_interval: float, stale_timeout: float,
     retry_base_delay: float, retry_max_delay: float, shutdown_event,
     rate_limit_retention_seconds: int = 3600,
+    pool_size: int = 10, max_overflow: int = 20,
+    pool_timeout: int = 30, pool_recycle: int = 1800,
 ) -> None:
     """Poll PostgreSQL for stale workers without executing tasks."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     dispose_database()
-    initialize_database(database_url)
+    initialize_database(
+        database_url,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
+    )
     policy = RetryPolicy(retry_base_delay, retry_max_delay)
     logger.info("Recovery scheduler started")
     while not shutdown_event.is_set():

@@ -6,7 +6,7 @@ from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import require_authentication
 from app.auth.jwt import issue_access_token
-from app.auth.password import validate_password
+from app.auth.password import MAX_PASSWORD_LENGTH, validate_password
 from app.rate_limit import rate_limit
 from app.services.user_service import InvalidCredentialsError, UserDatabaseError, authenticate_user, change_password
 
@@ -20,7 +20,14 @@ def login():
     body = request.get_json(silent=True)
     if isinstance(body, dict) and set(body) - {"username", "password"}:
         return _error("validation_error", 400)
-    if not isinstance(body, dict) or not isinstance(body.get("username"), str) or not isinstance(body.get("password"), str):
+    if (
+        not isinstance(body, dict)
+        or not isinstance(body.get("username"), str)
+        or not body["username"].strip()
+        or len(body["username"]) > 128
+        or not isinstance(body.get("password"), str)
+        or len(body["password"]) > MAX_PASSWORD_LENGTH
+    ):
         return _error("validation_error", 400)
     try:
         user = authenticate_user(body["username"].strip(), body["password"])
@@ -50,8 +57,15 @@ def change_own_password():
     current = body.get("current_password")
     new = body.get("new_password")
     validation = validate_password(new)
-    if not isinstance(current, str) or validation:
-        return _error("validation_error", 400, {"new_password": validation or "Current password is required."})
+    errors = {}
+    if not isinstance(current, str):
+        errors["current_password"] = "Current password is required."
+    elif len(current) > MAX_PASSWORD_LENGTH:
+        errors["current_password"] = f"Current password must be at most {MAX_PASSWORD_LENGTH} characters."
+    if validation:
+        errors["new_password"] = validation
+    if errors:
+        return _error("validation_error", 400, errors)
     try:
         change_password(g.current_user.id, current, new)
     except InvalidCredentialsError:
