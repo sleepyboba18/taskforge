@@ -61,7 +61,7 @@ def publish_event(event: str, payload: dict) -> None:
 def broadcast_server_shutdown() -> None:
     """Broadcast server shutdown notification to all connected clients."""
     try:
-        socketio.emit("server:shutdown", {"message": "Server is shutting down."}, broadcast=True, skip_sid=None)
+        socketio.emit("server:shutdown", {"message": "Server is shutting down."}, skip_sid=None)
         logger.info("Server shutdown notification broadcast to clients")
     except Exception:
         logger.exception("Failed to broadcast server shutdown event")

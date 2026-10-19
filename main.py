@@ -22,24 +22,24 @@ def main() -> None:
         logger.error("Configuration error: %s", exc)
         raise SystemExit(1) from exc
 
-    if settings.bootstrap_admin_username:
-        try:
-            initialize_schema()
-            bootstrap_admin(
-                username=settings.bootstrap_admin_username,
-                email=settings.bootstrap_admin_email,
-                password=settings.bootstrap_admin_password,
-            )
-        except UserServiceError as exc:
-            logger.error("Bootstrap administrator setup failed: %s", type(exc).__name__)
-            raise SystemExit(1) from exc
-
     worker_manager = WorkerManager(settings)
     lifecycle = get_lifecycle()
-    install_shutdown_handlers(worker_manager.stop)
-    worker_manager.start()
-    logger.info("Starting %s on %s:%s", settings.app_name, settings.host, settings.port)
     try:
+        if settings.bootstrap_admin_username:
+            try:
+                initialize_schema()
+                bootstrap_admin(
+                    username=settings.bootstrap_admin_username,
+                    email=settings.bootstrap_admin_email,
+                    password=settings.bootstrap_admin_password,
+                )
+            except UserServiceError as exc:
+                logger.error("Bootstrap administrator setup failed: %s", type(exc).__name__)
+                raise SystemExit(1) from exc
+
+        install_shutdown_handlers(worker_manager.stop)
+        worker_manager.start()
+        logger.info("Starting %s on %s:%s", settings.app_name, settings.host, settings.port)
         socketio.run(
             app,
             host=settings.host,
@@ -51,10 +51,16 @@ def main() -> None:
         logger.info("Shutdown requested")
     finally:
         lifecycle.mark_stopping()
-        broadcast_server_shutdown()
-        worker_manager.stop()
-        dispose_database()
-        lifecycle.mark_stopped()
+        try:
+            broadcast_server_shutdown()
+        finally:
+            try:
+                worker_manager.stop()
+            finally:
+                try:
+                    dispose_database()
+                finally:
+                    lifecycle.mark_stopped()
 
 if __name__ == "__main__":
     main()

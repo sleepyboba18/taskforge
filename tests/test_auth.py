@@ -5,13 +5,15 @@ from __future__ import annotations
 import unittest
 import uuid
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from werkzeug.http import parse_cookie
+import jwt
 
 from app import create_app
-from app.auth.jwt import issue_access_token
+from app.auth.jwt import ALGORITHM, issue_access_token
 from app.models import User, UserRole
+from app.sockets import broadcast_server_shutdown, socketio
 
 
 class AuthRouteTests(unittest.TestCase):
@@ -65,6 +67,65 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual("DENY", response.headers.get("X-Frame-Options"))
         self.assertEqual("no-referrer", response.headers.get("Referrer-Policy"))
         self.assertIn("default-src 'none'", response.headers.get("Content-Security-Policy", ""))
+
+    def test_signed_token_with_invalid_claims_cannot_authenticate(self) -> None:
+        now = datetime.now(timezone.utc)
+        secret = self.app.config["TASKFORGE_SETTINGS"].jwt_secret_key
+        valid_claims = {
+            "sub": str(self.user.id),
+            "user_id": str(self.user.id),
+            "role": UserRole.OPERATOR.value,
+            "token_type": "access",
+            "iat": now,
+            "exp": now + timedelta(minutes=1),
+        }
+
+        for claims in (
+            {**valid_claims, "user_id": str(uuid.uuid4())},
+            {**valid_claims, "role": "ADMINISTRATOR"},
+        ):
+            with self.subTest(claims=claims):
+                token = jwt.encode(claims, secret, algorithm=ALGORITHM)
+                response = self.client.get(
+                    "/api/v1/auth/me",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                self.assertEqual(401, response.status_code)
+
+    def test_socket_connection_rejects_missing_or_invalid_token(self) -> None:
+        unauthenticated = socketio.test_client(self.app)
+        self.assertFalse(unauthenticated.is_connected())
+
+        invalid = socketio.test_client(self.app, auth={"token": "not-a-jwt"})
+        self.assertFalse(invalid.is_connected())
+
+    def test_socket_connection_accepts_valid_access_token(self) -> None:
+        with self.app.app_context():
+            token, _ = issue_access_token(self.user)
+
+        with patch("app.sockets.session_scope") as session_scope:
+            session_scope.return_value.__enter__.return_value.get.return_value = self.user
+            connected = socketio.test_client(self.app, auth={"token": token})
+
+        self.assertTrue(connected.is_connected())
+        connected.disconnect()
+
+    def test_shutdown_broadcast_reaches_connected_client(self) -> None:
+        with self.app.app_context():
+            token, _ = issue_access_token(self.user)
+
+        with patch("app.sockets.session_scope") as session_scope:
+            session_scope.return_value.__enter__.return_value.get.return_value = self.user
+            connected = socketio.test_client(self.app, auth={"token": token})
+
+        broadcast_server_shutdown()
+
+        events = connected.get_received()
+        self.assertTrue(
+            any(event["name"] == "server:shutdown" for event in events),
+            f"Expected server:shutdown for connected user {self.user.id}, received {events!r}",
+        )
+        connected.disconnect()
 
 
 class AuthorizationRouteTests(unittest.TestCase):

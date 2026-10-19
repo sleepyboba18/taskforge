@@ -377,6 +377,24 @@ Versioned JSON endpoints live under `/api/v1`. Routes validate input, apply the 
 
 Protected endpoints require the existing Bearer JWT and role checks. Invalid credentials return JSON errors without revealing resource existence or exposing tokens. Administrative and monitoring APIs require elevated roles.
 
+## Testing
+
+Install development test dependencies and run the full suite:
+
+```text
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Pytest forces `APP_ENV=testing` and test-only Flask/JWT secrets. Without a test database, application tests use a loopback-only PostgreSQL URL that cannot reach a production host; database-backed integration tests are skipped. To run those tests, set `TASKFORGE_TEST_DATABASE_URL` to a dedicated, disposable PostgreSQL database that is not the same database as `DATABASE_URL` in the shell or `.env`. For PowerShell:
+
+```powershell
+$env:TASKFORGE_TEST_DATABASE_URL = "postgresql+psycopg://taskforge_test:taskforge_test@127.0.0.1:5432/taskforge_test"
+python -m pytest
+```
+
+The PostgreSQL integration fixture creates and removes TaskForge tables in that database, so never point it at a production or shared database. PostgreSQL-specific locking and transaction behavior must be validated against PostgreSQL; SQLite is not used as a substitute. Optional coverage is available with `python -m pytest --cov=app --cov-report=term-missing` after installing `requirements-dev.txt`.
+
 ## Error Responses
 
 API errors use the existing `success: false` envelope with an error code/message, request ID, and optional details. Malformed JSON, unsupported methods, unknown routes, oversized bodies, database failures, and unexpected exceptions return JSON rather than HTML. Stack traces and infrastructure details remain internal.
