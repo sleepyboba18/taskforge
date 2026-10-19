@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +24,8 @@ class JobAttempt(Base):
     __tablename__ = "job_attempts"
     __table_args__ = (
         UniqueConstraint("job_id", "attempt_number", name="uq_job_attempts_job_attempt_number"),
+        Index("ix_job_attempts_worker_status", "worker_id", "status"),
+        Index("ix_job_attempts_status_started_at", "status", "started_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

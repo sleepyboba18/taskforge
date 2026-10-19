@@ -69,7 +69,13 @@ def create_app(settings: Settings | None = None) -> Flask:
     cors_origins: str | list[str] = settings.cors_origins
     CORS(app, origins=cors_origins, supports_credentials=settings.cors_supports_credentials)
     socketio.init_app(app, cors_allowed_origins=cors_origins)
-    initialize_database(settings.database_url)
+    initialize_database(
+        settings.database_url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_recycle=settings.db_pool_recycle,
+    )
 
     app.register_blueprint(api_bp)
     _register_error_handlers(app)
@@ -80,6 +86,10 @@ def create_app(settings: Settings | None = None) -> Flask:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+        if request.is_secure or app.config.get("ENV") == "production":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        response.headers.setdefault("Cache-Control", "no-store")
         request_id = getattr(g, "request_id", None)
         if request_id:
             response.headers["X-Request-ID"] = request_id

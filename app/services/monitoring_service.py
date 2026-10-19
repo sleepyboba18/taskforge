@@ -92,25 +92,64 @@ def get_monitoring_snapshot(*, window: str, settings: Any) -> dict[str, Any]:
                     JobDependency.job_id == Job.id, dependency_parent.status != JobStatus.COMPLETED
                 )),
             )) or 0
-            completed_window = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.COMPLETED, Job.updated_at >= cutoff)) or 0
-            failed_window = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.FAILED, Job.updated_at >= cutoff)) or 0
-            cancelled_window = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.CANCELLED, Job.updated_at >= cutoff)) or 0
-            retry_window = session.scalar(select(func.count()).select_from(Job).where(Job.retry_count > 0, Job.updated_at >= cutoff)) or 0
-            previous_failed = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.FAILED, Job.updated_at >= previous_cutoff, Job.updated_at < cutoff)) or 0
-            previous_retry = session.scalar(select(func.count()).select_from(Job).where(Job.retry_count > 0, Job.updated_at >= previous_cutoff, Job.updated_at < cutoff)) or 0
+            long_running_cutoff = now - timedelta(seconds=settings.long_running_job_threshold_seconds)
+            stale_cutoff = now - timedelta(seconds=settings.worker_stale_timeout)
+
+            job_aggregates = session.execute(
+                select(
+                    func.count().filter((Job.status == JobStatus.COMPLETED) & (Job.updated_at >= cutoff)),
+                    func.count().filter((Job.status == JobStatus.FAILED) & (Job.updated_at >= cutoff)),
+                    func.count().filter((Job.status == JobStatus.CANCELLED) & (Job.updated_at >= cutoff)),
+                    func.count().filter((Job.retry_count > 0) & (Job.updated_at >= cutoff)),
+                    func.count().filter((Job.status == JobStatus.FAILED) & (Job.updated_at >= previous_cutoff) & (Job.updated_at < cutoff)),
+                    func.count().filter((Job.retry_count > 0) & (Job.updated_at >= previous_cutoff) & (Job.updated_at < cutoff)),
+                    func.count().filter((Job.status == JobStatus.RUNNING) & Job.started_at.is_not(None) & (Job.started_at < long_running_cutoff)),
+                    func.count().filter((Job.status == JobStatus.RUNNING) & Job.started_at.is_not(None) & (Job.started_at < stale_cutoff)),
+                    func.min(Job.created_at).filter(Job.status == JobStatus.PENDING),
+                    func.min(Job.scheduled_at).filter((Job.status == JobStatus.SCHEDULED) & Job.scheduled_at.is_not(None)),
+                )
+            ).one()
+
+            (
+                completed_window,
+                failed_window,
+                cancelled_window,
+                retry_window,
+                previous_failed,
+                previous_retry,
+                long_running,
+                stale_jobs,
+                oldest_pending,
+                next_scheduled,
+            ) = (
+                job_aggregates[0] or 0,
+                job_aggregates[1] or 0,
+                job_aggregates[2] or 0,
+                job_aggregates[3] or 0,
+                job_aggregates[4] or 0,
+                job_aggregates[5] or 0,
+                job_aggregates[6] or 0,
+                job_aggregates[7] or 0,
+                job_aggregates[8],
+                job_aggregates[9],
+            )
+
             attempt_duration = func.extract("epoch", JobAttempt.finished_at - JobAttempt.started_at) * 1000
             latency = session.scalar(select(func.avg(attempt_duration)).where(JobAttempt.status == AttemptStatus.COMPLETED, JobAttempt.finished_at.is_not(None), JobAttempt.started_at >= cutoff)) or 0
             queue_wait = session.scalar(select(func.avg(func.extract("epoch", JobAttempt.started_at - Job.created_at) * 1000)).join(Job, Job.id == JobAttempt.job_id).where(JobAttempt.started_at >= cutoff)) or 0
             total_job_time = session.scalar(select(func.avg(func.extract("epoch", Job.completed_at - Job.created_at) * 1000)).where(Job.status == JobStatus.COMPLETED, Job.completed_at.is_not(None), Job.completed_at >= cutoff)) or 0
-            oldest_pending = session.scalar(select(func.min(Job.created_at)).where(Job.status == JobStatus.PENDING))
-            long_running = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.RUNNING, Job.started_at.is_not(None), Job.started_at < now - timedelta(seconds=settings.long_running_job_threshold_seconds))) or 0
-            stale_jobs = session.scalar(select(func.count()).select_from(Job).where(Job.status == JobStatus.RUNNING, Job.started_at.is_not(None), Job.started_at < now - timedelta(seconds=settings.worker_stale_timeout))) or 0
-            dlq_depth = session.scalar(select(func.count()).select_from(DeadLetterJob)) or 0
-            dlq_window = session.scalar(select(func.count()).select_from(DeadLetterJob).where(DeadLetterJob.failed_at >= cutoff)) or 0
+
+            dlq_aggregates = session.execute(
+                select(
+                    func.count(),
+                    func.count().filter(DeadLetterJob.failed_at >= cutoff),
+                ).select_from(DeadLetterJob)
+            ).one()
+            dlq_depth, dlq_window = dlq_aggregates[0] or 0, dlq_aggregates[1] or 0
+
             audit_total = session.scalar(select(func.count()).select_from(AuditEvent)) or 0
             dependency_edges = session.scalar(select(func.count()).select_from(JobDependency)) or 0
             recurring_count = session.scalar(select(func.count()).select_from(RecurringJob).where(RecurringJob.enabled.is_(True))) or 0
-            next_scheduled = session.scalar(select(func.min(Job.scheduled_at)).where(Job.status == JobStatus.SCHEDULED, Job.scheduled_at.is_not(None)))
             database_latency_ms = (time.perf_counter() - started) * 1000
             queue_depth = pending
             utilization = round(busy_workers / active_workers * 100, 2) if active_workers else 0

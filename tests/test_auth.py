@@ -7,6 +7,8 @@ import uuid
 from dataclasses import replace
 from unittest.mock import patch
 
+from werkzeug.http import parse_cookie
+
 from app import create_app
 from app.auth.jwt import issue_access_token
 from app.models import User, UserRole
@@ -55,6 +57,14 @@ class AuthRouteTests(unittest.TestCase):
         with patch("app.auth.jwt.authenticate_request", return_value=(None, "token_expired")):
             response = self.client.get("/api/v1/auth/me")
         self.assertEqual(401, response.status_code)
+
+    def test_security_headers_are_present(self) -> None:
+        response = self.client.get("/health")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("nosniff", response.headers.get("X-Content-Type-Options"))
+        self.assertEqual("DENY", response.headers.get("X-Frame-Options"))
+        self.assertEqual("no-referrer", response.headers.get("Referrer-Policy"))
+        self.assertIn("default-src 'none'", response.headers.get("Content-Security-Policy", ""))
 
 
 class AuthorizationRouteTests(unittest.TestCase):

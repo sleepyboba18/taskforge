@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,7 +22,10 @@ class Worker(Base):
     """An independently running TaskForge worker process."""
 
     __tablename__ = "workers"
-    __table_args__ = (UniqueConstraint("worker_name", name="uq_workers_worker_name"),)
+    __table_args__ = (
+        UniqueConstraint("worker_name", name="uq_workers_worker_name"),
+        Index("ix_workers_status_heartbeat", "status", "last_heartbeat_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     worker_name: Mapped[str] = mapped_column(String(255), nullable=False)

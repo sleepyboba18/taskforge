@@ -20,12 +20,28 @@ _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 
 
-def initialize_database(database_url: str) -> None:
+def initialize_database(
+    database_url: str,
+    pool_size: int = 10,
+    max_overflow: int = 20,
+    pool_timeout: int = 30,
+    pool_recycle: int = 1800,
+) -> None:
     """Create database infrastructure without opening a connection."""
     global _engine, _session_factory
     if _engine is not None:
         return
-    _engine = create_engine(database_url, pool_pre_ping=True)
+    if database_url.startswith("sqlite"):
+        _engine = create_engine(database_url, pool_pre_ping=True)
+    else:
+        _engine = create_engine(
+            database_url,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
+            pool_recycle=pool_recycle,
+            pool_pre_ping=True,
+        )
     _session_factory = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
     logger.info("Initialized SQLAlchemy database engine")
 

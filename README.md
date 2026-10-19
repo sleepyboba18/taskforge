@@ -27,7 +27,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and set `DATABASE_URL` to your Supabase PostgreSQL URL. Keep `.env` private; it is ignored by Git. The application requires this variable during startup.
+Copy `.env.example` to `.env` and set `DATABASE_URL` to your Supabase PostgreSQL URL. Keep `.env` private; it is ignored by Git. The application requires this variable during startup. Optionally tune connection pooling via `DB_POOL_SIZE` (default 10), `DB_MAX_OVERFLOW` (default 20), `DB_POOL_TIMEOUT` (default 30s), and `DB_POOL_RECYCLE` (default 1800s).
 
 ## Run
 
@@ -36,6 +36,19 @@ python main.py
 ```
 
 The service listens on the configured host and port. `GET /health` returns the service status. Database connectivity can be checked through the reusable `check_database_connection` function; this foundation does not create tables automatically.
+
+## Security
+
+TaskForge applies defense-in-depth controls across authentication, transport security, request validation, and operational boundaries.
+
+- JWT access tokens are validated using explicit claim checks. The token must include a valid `sub`, matching `user_id`, a recognized `role`, `iat`, `exp`, and `token_type` set to `access`. Expired or malformed tokens are rejected before any request is authorized.
+- Socket.IO client connections are authenticated using the same access-token rules as the HTTP layer. A client cannot connect without a valid signed JWT, and invalid or expired tokens are denied before session state is established.
+- HTTP responses include hardened security headers such as `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a restrictive `Content-Security-Policy`, and `Strict-Transport-Security` when the app is served over HTTPS.
+- CORS is restricted to configured origins, request bodies are validated as JSON for API endpoints, and payload size is capped by `MAX_REQUEST_BODY_MB` to prevent oversized request abuse.
+- Protected routes enforce authentication and role checks against the database-backed account, never against a client-supplied role field. Errors remain generic and structured, and request IDs are emitted to support auditability without leaking internal details.
+- Rate limiting is enforced on external API traffic, and sensitive values such as JWTs, session state, and database URLs are not exposed in normal logs or API responses.
+
+These controls are intended to reduce common web-service risks including authentication bypass, JWT misuse, request abuse, CSRF-style browser abuse, and insecure default error handling while preserving the current TaskForge architecture.
 
 ## Process Lifecycle
 

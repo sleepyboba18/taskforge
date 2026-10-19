@@ -136,7 +136,7 @@ def get_dependencies(job_id: uuid.UUID) -> list[tuple[JobDependency, Job]]:
                 .where(JobDependency.job_id == job_id)
                 .order_by(JobDependency.created_at.asc(), Job.id.asc())
             ))
-            if not session.get(Job, job_id):
+            if not rows and not session.get(Job, job_id):
                 raise DependencyNotFoundError
             return rows
     except DependencyError:

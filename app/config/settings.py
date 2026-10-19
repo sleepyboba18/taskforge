@@ -23,6 +23,10 @@ class Settings:
     host: str
     port: int
     database_url: str
+    db_pool_size: int
+    db_max_overflow: int
+    db_pool_timeout: int
+    db_pool_recycle: int
     secret_key: str
     worker_count: int
     worker_poll_interval: float
@@ -95,6 +99,10 @@ class Settings:
             host=os.getenv("HOST", "127.0.0.1"),
             port=_parse_bounded_positive_int("PORT", default=5000, maximum=65535),
             database_url=database_url,
+            db_pool_size=_parse_bounded_int("DB_POOL_SIZE", default=10, maximum=100),
+            db_max_overflow=_parse_non_negative_bounded_int("DB_MAX_OVERFLOW", default=20, maximum=100),
+            db_pool_timeout=_parse_bounded_int("DB_POOL_TIMEOUT", default=30, maximum=300),
+            db_pool_recycle=_parse_non_negative_bounded_int("DB_POOL_RECYCLE", default=1800, maximum=7200),
             secret_key=os.getenv("SECRET_KEY", "change-me"),
             worker_count=_parse_bounded_int("WORKER_COUNT", default=2, maximum=32),
             worker_poll_interval=_parse_positive_float("WORKER_POLL_INTERVAL", default=1.0),

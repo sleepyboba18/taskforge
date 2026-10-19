@@ -31,7 +31,7 @@ class ClaimedJob:
 
 def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
     """Atomically claim the highest-priority eligible job with SKIP LOCKED."""
-    worker = session.scalar(select(Worker).where(Worker.id == worker_id).with_for_update())
+    worker = session.get(Worker, worker_id)
     if worker is None or worker.status != WorkerStatus.IDLE:
         return None
     if queue_is_paused(session):
@@ -60,12 +60,9 @@ def claim_next_job(session: Session, worker_id: uuid.UUID) -> ClaimedJob | None:
         return None
 
     now = datetime.now(timezone.utc)
-    previous_attempt = session.scalar(
-        select(func.max(JobAttempt.attempt_number)).where(JobAttempt.job_id == job.id)
-    )
     attempt = JobAttempt(
         job_id=job.id,
-        attempt_number=(previous_attempt or 0) + 1,
+        attempt_number=job.retry_count + 1,
         worker_id=worker_id,
         status=AttemptStatus.RUNNING,
         started_at=now,

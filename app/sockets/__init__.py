@@ -6,6 +6,7 @@ import jwt
 from flask import current_app, session
 from flask_socketio import SocketIO
 
+from app.auth.jwt import ALGORITHM, _validate_token_claims
 from app.database.session import session_scope
 from app.models import User
 
@@ -15,13 +16,20 @@ logger = logging.getLogger("taskforge.sockets")
 
 @socketio.on("connect")
 def authenticate_socket(auth):
-    """Require a valid user token for externally initiated Socket.IO sessions."""
+    """Require a valid access token for externally initiated Socket.IO sessions."""
     token = auth.get("token") if isinstance(auth, dict) else None
     if not token:
         return False
     try:
         settings = current_app.config["TASKFORGE_SETTINGS"]
-        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
+        claims = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[ALGORITHM],
+            options={"require": ["sub", "user_id", "role", "iat", "exp", "token_type"]},
+        )
+        if _validate_token_claims(claims):
+            return False
         user_id = claims.get("sub")
         with session_scope() as database_session:
             user = database_session.get(User, user_id)
@@ -30,6 +38,8 @@ def authenticate_socket(auth):
             session["user_id"] = str(user.id)
             session["role"] = user.role.value
             return True
+    except jwt.ExpiredSignatureError:
+        return False
     except (jwt.InvalidTokenError, TypeError, ValueError):
         return False
 

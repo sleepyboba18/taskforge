@@ -69,20 +69,25 @@ def collect_metrics(*, window: str) -> dict[str, Any]:
                 )
             ).one()
             total_outcomes = completed_window + failed_window
-            healthy_workers = session.scalar(
-                select(func.count()).select_from(Worker).where(
-                    Worker.status.in_([WorkerStatus.IDLE, WorkerStatus.BUSY]),
-                    Worker.last_heartbeat_at.is_not(None),
-                    Worker.last_heartbeat_at >= cutoff,
-                )
-            ) or 0
-            stale_workers = session.scalar(
-                select(func.count()).select_from(Worker).where(Worker.status == WorkerStatus.STALE)
-            ) or 0
-            total_workers = session.scalar(select(func.count()).select_from(Worker)) or 0
+
+            worker_stats = session.execute(
+                select(
+                    func.count(),
+                    func.count().filter(Worker.status.in_([WorkerStatus.IDLE, WorkerStatus.BUSY]) & Worker.last_heartbeat_at.is_not(None) & (Worker.last_heartbeat_at >= cutoff)),
+                    func.count().filter(Worker.status == WorkerStatus.STALE),
+                ).select_from(Worker)
+            ).one()
+            total_workers, healthy_workers, stale_workers = worker_stats[0] or 0, worker_stats[1] or 0, worker_stats[2] or 0
+
             workflow_counts = dict(session.execute(select(Workflow.status, func.count()).group_by(Workflow.status)).all())
-            audit_events_total = session.scalar(select(func.count()).select_from(AuditEvent)) or 0
-            admin_actions_total = session.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.event_type.in_([AuditEventType.QUEUE_PAUSED, AuditEventType.QUEUE_RESUMED, AuditEventType.BULK_JOB_CANCEL, AuditEventType.BULK_JOB_RETRY, AuditEventType.ADMIN_ACTION]))) or 0
+
+            audit_stats = session.execute(
+                select(
+                    func.count(),
+                    func.count().filter(AuditEvent.event_type.in_([AuditEventType.QUEUE_PAUSED, AuditEventType.QUEUE_RESUMED, AuditEventType.BULK_JOB_CANCEL, AuditEventType.BULK_JOB_RETRY, AuditEventType.ADMIN_ACTION])),
+                ).select_from(AuditEvent)
+            ).one()
+            audit_events_total, admin_actions_total = audit_stats[0] or 0, audit_stats[1] or 0
             dependency_edges = session.scalar(select(func.count()).select_from(JobDependency)) or 0
             dependency_parent = aliased(Job)
             dependency_waiting = session.scalar(

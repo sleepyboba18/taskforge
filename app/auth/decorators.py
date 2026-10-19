@@ -18,6 +18,8 @@ def _auth_error(code: str, status: int = 401):
 def require_authentication(view: Callable):
     @wraps(view)
     def wrapped(*args, **kwargs):
+        if getattr(g, "current_user", None) is not None:
+            return view(*args, **kwargs)
         user, error = authenticate_request()
         if error:
             return _auth_error(error)

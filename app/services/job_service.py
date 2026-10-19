@@ -180,8 +180,10 @@ def bulk_cancel_jobs(job_ids: list[uuid.UUID], *, max_dependency_propagation_dep
     results = []
     try:
         with session_scope() as session:
+            jobs = list(session.scalars(select(Job).where(Job.id.in_(job_ids)).with_for_update()))
+            job_map = {job.id: job for job in jobs}
             for job_id in job_ids:
-                job = get_job_for_update(session, job_id)
+                job = job_map.get(job_id)
                 if job is None:
                     results.append({"job_id": str(job_id), "status": "not_found"})
                     continue
@@ -205,8 +207,12 @@ def bulk_retry_jobs(job_ids: list[uuid.UUID]) -> list[dict[str, Any]]:
     results = []
     try:
         with session_scope() as session:
+            jobs = list(session.scalars(select(Job).where(Job.id.in_(job_ids)).with_for_update()))
+            job_map = {job.id: job for job in jobs}
+            dead_letters = list(session.scalars(select(DeadLetterJob).where(DeadLetterJob.job_id.in_(job_ids)).with_for_update()))
+            dead_letter_map = {dl.job_id: dl for dl in dead_letters}
             for job_id in job_ids:
-                job = get_job_for_update(session, job_id)
+                job = job_map.get(job_id)
                 if job is None:
                     results.append({"job_id": str(job_id), "status": "not_found"})
                     continue
@@ -218,7 +224,7 @@ def bulk_retry_jobs(job_ids: list[uuid.UUID]) -> list[dict[str, Any]]:
                 job.last_error = None
                 job.next_retry_at = None
                 record_current(session, event_type=AuditEventType.JOB_RETRIED, entity_type=AuditEntityType.JOB, entity_id=job.id, job_id=job.id, workflow_id=job.workflow_id, details={"retry_source": "USER"})
-                dead_letter = session.scalar(select(DeadLetterJob).where(DeadLetterJob.job_id == job.id).with_for_update())
+                dead_letter = dead_letter_map.get(job.id)
                 if dead_letter is not None:
                     session.delete(dead_letter)
                 results.append({"job_id": str(job_id), "status": "retrying"})
